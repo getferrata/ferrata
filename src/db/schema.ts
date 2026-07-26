@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
+import type { ContextiaMode } from "@/lib/sources/dlp";
 
 /**
  * Schema of record for Ferrata: the core course/module/question model plus
@@ -74,12 +75,20 @@ export const courses = sqliteTable("courses", {
   // The examiner/author who owns this course. Null for seed/legacy courses,
   // which remain visible to everyone (a fresh install has no owner yet).
   ownerId: text("owner_id"),
+  // An imported course is somebody else's work until an author here has read it
+  // and says it is fit to teach. Null means nobody has.
+  verifiedAt: integer("verified_at"),
+  verifiedBy: text("verified_by"),
   // How deep explanations go (biases intake + write_module). Operational is
   // the default.
   depthPreset: text("depth_preset")
     .$type<DepthPreset>()
     .notNull()
     .default("operational"),
+  // The DLP level the author picked at creation. Kept because the interview
+  // answers arrive later and must be scanned the same way the material was.
+  // Null means "whatever the operator's floor is".
+  contextiaMode: text("contextia_mode").$type<ContextiaMode>(),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch() * 1000)`),

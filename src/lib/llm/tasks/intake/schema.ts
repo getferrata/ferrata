@@ -32,6 +32,21 @@ export const intakeSchema = z.object({
    */
   concretenessRule: z.string().min(1),
   candidateConcepts: z.array(candidateConceptSchema).min(3).max(40),
+  /**
+   * What the material covered and this course deliberately leaves out. The
+   * prompt tells intake to drop what the student already knows and what the
+   * deadline does not reach; without this field it dropped it in silence and
+   * the student was never told a whole appendix had been skipped.
+   */
+  outOfScope: z
+    .array(
+      z.object({
+        title: z.string().min(1),
+        reason: z.string().min(1),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 export type IntakeResult = z.infer<typeof intakeSchema>;

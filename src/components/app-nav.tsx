@@ -11,6 +11,7 @@ interface Me {
 const EXAMINER_LINKS = [
   { href: "/courses", label: "Courses" },
   { href: "/crea", label: "New route" },
+  { href: "/import", label: "Import" },
   { href: "/examiner", label: "Students" },
   { href: "/examiner/users", label: "Users" },
   { href: "/settings", label: "Settings" },

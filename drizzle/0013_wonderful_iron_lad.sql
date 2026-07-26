@@ -1,0 +1,1 @@
+ALTER TABLE `courses` ADD `contextia_mode` text;

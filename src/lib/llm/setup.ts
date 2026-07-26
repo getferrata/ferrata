@@ -1,5 +1,6 @@
 import { planTask } from "./registry";
 import { estimateCourseCost, type CourseCostEstimate } from "./estimate";
+import { measuredPerModuleUsd } from "./spend";
 
 /**
  * "Is generation going to work?" for the first-run experience. Stored settings
@@ -59,6 +60,10 @@ export async function llmSetupStatus(): Promise<SetupStatus> {
     configured: reason !== null,
     reason,
     active: { provider: plan.providerName, model: plan.model },
-    cost: estimateCourseCost(plan.providerName, plan.model),
+    cost: estimateCourseCost(
+      plan.providerName,
+      plan.model,
+      measuredPerModuleUsd(),
+    ),
   };
 }

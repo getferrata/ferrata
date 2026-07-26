@@ -1,10 +1,12 @@
 import Link from "next/link";
 import type { CourseBundle } from "@/lib/course/query";
 import { renderMarkdown } from "@/lib/md";
+import { VerifyCourse } from "@/components/verify-course";
 import { getDueSummary } from "@/lib/review/due";
 import { StateChip } from "./state-chip";
 import { ExportButton } from "./export-button";
 import { DeleteCourse } from "./delete-course";
+import { CourseReceipt } from "./course-receipt";
 import { ConceptGraph } from "./concept-graph";
 import { FerrataMark } from "./brand";
 
@@ -18,11 +20,15 @@ const KIND_LABEL: Record<string, string> = {
 export function CourseOverview({
   bundle,
   userId,
+  verifiedByName = null,
+  canVerify = false,
   deadline,
   resume,
 }: {
   bundle: CourseBundle;
   userId?: string;
+  verifiedByName?: string | null;
+  canVerify?: boolean;
   deadline?: number | null;
   /** A student's resume bookmark: the last module they opened. */
   resume?: { moduleId: string; title: string } | null;
@@ -46,16 +52,18 @@ export function CourseOverview({
       : null;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
+    <main className="mx-auto max-w-6xl px-6 py-12">
       {/* Front matter */}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-step--1 uppercase tracking-[0.08em] text-text-muted">
           {course.domain ?? "route"} · {course.lang}
         </p>
         {course.origin === "imported" ? (
-          <span className="rounded border border-state-doubt px-2 py-0.5 text-step--1 text-state-doubt">
-            imported · not verified by you
-          </span>
+          <VerifyCourse
+            courseId={course.id}
+            verifiedByName={verifiedByName}
+            canVerify={canVerify}
+          />
         ) : null}
       </div>
       <h1 className="mt-2 max-w-measure font-serif text-step-4 leading-[1.1] tracking-tight">
@@ -127,7 +135,7 @@ export function CourseOverview({
         </section>
       ) : null}
 
-      <div className="mt-12 grid gap-12 lg:grid-cols-[1fr_20rem]">
+      <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,1fr)_24rem]">
         {/* The route */}
         <section aria-label="The route">
           <h2 className="mb-6 font-serif text-step-2">The route</h2>
@@ -245,26 +253,6 @@ export function CourseOverview({
               </Link>
             ) : null}
           </section>
-
-          {course.scheduleMd ? (
-            <details
-              open
-              className="rounded border border-border bg-bg-subtle p-4 [&[open]_.marker]:rotate-90"
-            >
-              <summary className="flex cursor-pointer items-center gap-2 text-step--1 uppercase tracking-wide text-text-muted marker:content-['']">
-                <span className="marker font-mono transition-transform">
-                  &rsaquo;
-                </span>
-                Schedule
-              </summary>
-              <div
-                className="reading-prose mt-3 overflow-x-auto text-step--1 [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap"
-                dangerouslySetInnerHTML={{
-                  __html: renderMarkdown(course.scheduleMd),
-                }}
-              />
-            </details>
-          ) : null}
 
           <details className="rounded border border-border p-4 [&[open]_.marker]:rotate-90">
             <summary className="flex cursor-pointer items-center gap-2 text-step--1 uppercase tracking-wide text-text-muted marker:content-['']">
@@ -397,6 +385,24 @@ export function CourseOverview({
           </section>
         </aside>
       </div>
+
+      {course.scheduleMd ? (
+        <details
+          open
+          className="mt-12 rounded border border-border bg-bg-subtle p-5 [&[open]_.marker]:rotate-90"
+        >
+          <summary className="flex cursor-pointer items-center gap-2 text-step--1 uppercase tracking-wide text-text-muted marker:content-['']">
+            <span className="marker font-mono transition-transform">&rsaquo;</span>
+            Schedule
+          </summary>
+          <div
+            className="reading-prose mt-4 overflow-x-auto"
+            dangerouslySetInnerHTML={{
+              __html: renderMarkdown(course.scheduleMd),
+            }}
+          />
+        </details>
+      ) : null}
 
       {course.glossaryMd ? (
         <p className="mt-12 text-step--1 text-text-muted">

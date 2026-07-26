@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { enrollments } from "@/db/schema";
+import { enrollments, users } from "@/db/schema";
 import { getCourseBundle } from "@/lib/course/query";
 import { CourseOverview } from "@/components/course-overview";
 import { SiteHeader } from "@/components/site-header";
@@ -69,6 +69,8 @@ export default async function CoursePage({
         />
         <CourseOverview
           bundle={bundle}
+          verifiedByName={verifierName(bundle.course.verifiedBy)}
+          canVerify={user.role === "examiner"}
           userId={user.role === "student" ? user.id : undefined}
           deadline={
             user.role === "student" ? studentDeadline(id, user.id) : null
@@ -91,4 +93,15 @@ export default async function CoursePage({
       </main>
     </>
   );
+}
+
+/** Name of whoever vouched for an imported course, for the badge. */
+function verifierName(userId: string | null): string | null {
+  if (!userId) return null;
+  const row = db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId))
+    .get();
+  return row?.name ?? "someone here";
 }

@@ -7,7 +7,7 @@ import {
   reviews as reviewsT,
   users as usersT,
 } from "@/db/schema";
-import { retrievability, type StoredCard } from "@/lib/fsrs";
+import { knowledgeHeld, type StoredCard } from "@/lib/fsrs";
 
 export interface StudentProgress {
   userId: string;
@@ -15,16 +15,18 @@ export interface StudentProgress {
   email: string;
   total: number; // questions in the course
   answered: number; // distinct questions this student has tested
-  retention: number | null; // mean retrievability over answered (null if none)
+  retention: number | null; // knowledge held over the whole course (null if untested)
   sureWrong: number; // answered high-confidence but wrong (latest)
   deadline: number | null; // this student's finish-by, epoch ms
 }
 
 /**
  * The examiner's roster for one course: each enrolled student with an honest
- * measure of what they actually know: mean retrievability over the questions
- * they've tested, and the count of "sure and wrong" (the dangerous cell). Never
- * a completion percentage.
+ * measure of what they actually know: retrievability summed over every question
+ * in the course, so untested material counts as not known, plus the count of
+ * "sure and wrong" (the dangerous cell). Never a completion percentage, and
+ * never flattering: it can only reach 100 by answering everything and holding
+ * it.
  */
 export function getRoster(
   courseId: string,
@@ -98,16 +100,20 @@ export function getRoster(
     let sureWrong = 0;
     for (const v of latest.values()) {
       if (v.card) {
-        sum += retrievability(v.card, at);
+        sum += knowledgeHeld(v.card, v.correct, at);
         n += 1;
       }
       if (!v.correct && v.confidence === "high") sureWrong += 1;
     }
+    // Divided by every question in the course, not by the ones answered. A
+    // question never asked is not knowledge held, it is knowledge unmeasured,
+    // and counting it as a pass turned four correct answers out of a hundred
+    // into "100% ready".
     return {
       ...s,
       total,
       answered: latest.size,
-      retention: n > 0 ? sum / n : null,
+      retention: n > 0 && total > 0 ? sum / total : null,
       sureWrong,
     };
   });

@@ -4,6 +4,7 @@ import { courses } from "@/db/schema";
 import { enqueue } from "@/lib/jobs/queue";
 import { newId } from "@/lib/util/id";
 import { ingestSource } from "@/lib/sources/ingest";
+import { saveRestorations, scanAuthorText } from "@/lib/sources/protect";
 import { expandSeeds } from "@/lib/sources/url";
 import { allowedRepoRoots, ingestRepo, repoPathAllowed } from "@/lib/sources/repo";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -93,6 +94,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
   }
 
+  // A pasted course package is a common mistake and an expensive one: without
+  // this the whole pipeline runs on it, bills the author, and produces a course
+  // about a JSON file.
+  if (looksLikePackage(prompt)) {
+    return NextResponse.json(
+      {
+        error:
+          "That looks like an exported Ferrata course. Use Import to bring it in: it keeps the modules and tests as they are, and costs nothing.",
+      },
+      { status: 400 },
+    );
+  }
+
   const effectivePrompt =
     prompt.length >= 10
       ? prompt
@@ -114,7 +128,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (hours) parts.push(`Vincolo di tempo: ho circa ${hours} ore.`);
   if (deadline) parts.push(`Scadenza: ${deadline}.`);
   if (level) parts.push(`Livello di partenza: ${level}.`);
-  const sourcePrompt = parts.join("\n\n");
+
+  // The brief goes through the same gate as uploaded material: an author writing
+  // "how we deploy to db-01.internal" would otherwise hand that host to the
+  // model and to everyone who receives the exported package.
+  const scan = await scanAuthorText(parts.join("\n\n"), contextiaMode);
+  const sourcePrompt = scan.text;
 
   const id = newId("course");
   db.insert(courses)
@@ -122,15 +141,20 @@ export async function POST(req: Request): Promise<NextResponse> {
       id,
       // Intake replaces this with the real title it derives.
       title:
-        prompt.length >= 10 ? prompt.slice(0, 80) : "New route (from material)",
+        prompt.length >= 10
+          ? sourcePrompt.slice(0, 80)
+          : "New route (from material)",
       sourcePrompt,
       origin: "local",
       ownerId: user.id,
       depthPreset,
+      contextiaMode,
       budgetMinutes: hours && Number.isFinite(hours) ? Math.round(hours * 60) : undefined,
       status: "interviewing",
     })
     .run();
+  // Saved after the insert: the restore map points at the course row.
+  saveRestorations(id, scan.restorations);
 
   // Ingest attached material (best-effort; a bad file must not sink creation).
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
@@ -187,4 +211,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   enqueue("interview_questions", { courseId: id, actorUserId: user.id });
   return NextResponse.json({ id }, { status: 201 });
+}
+
+/** True when the brief is really an exported package someone pasted. */
+function looksLikePackage(text: string): boolean {
+  const t = text.trim();
+  if (!t.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(t) as { manifest?: { format?: unknown } };
+    return parsed?.manifest?.format === "ferrata";
+  } catch {
+    // Truncated or slightly mangled paste: the marker is still a giveaway.
+    return /"format"\s*:\s*"ferrata"/.test(t);
+  }
 }

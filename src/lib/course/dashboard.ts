@@ -8,7 +8,7 @@ import {
   questions as questionsT,
   reviews as reviewsT,
 } from "@/db/schema";
-import { retrievability, type StoredCard } from "@/lib/fsrs";
+import { knowledgeHeld, type StoredCard } from "@/lib/fsrs";
 import { plainText } from "@/lib/text";
 
 export interface ConceptRetention {
@@ -16,7 +16,7 @@ export interface ConceptRetention {
   title: string;
   total: number;
   tested: number;
-  retention: number | null; // mean retrievability over tested questions
+  retention: number | null; // knowledge held, over every question in the concept
   /** Latest explain-back verdict: explained cleanly, with a gap, or never. */
   explained: "complete" | "gappy" | null;
 }
@@ -108,7 +108,7 @@ export function getDashboard(
     const last = latestByQuestion.get(q.id);
     if (last) {
       tested++;
-      agg.retentions.push(retrievability(last.card, at));
+      agg.retentions.push(knowledgeHeld(last.card, last.correct, at));
       if (!last.correct && last.confidence === "high") {
         sureWrong.push({
           questionId: q.id,
@@ -153,12 +153,16 @@ export function getDashboard(
     };
   });
 
-  const testedRetentions = conceptRetention
-    .filter((c) => c.retention !== null)
-    .map((c) => c.retention as number);
+  // Over every concept, not only the tested ones. "The share of concepts you
+  // would still know if quizzed right now" has to count the ones you have never
+  // been quizzed on, otherwise a single correct answer reads as complete
+  // readiness. Null only while nothing at all has been tested, where the honest
+  // answer is that there is nothing to say yet.
+  const anyTested = conceptRetention.some((c) => c.retention !== null);
   const courseRetention =
-    testedRetentions.length > 0
-      ? testedRetentions.reduce((s, r) => s + r, 0) / testedRetentions.length
+    anyTested && conceptRetention.length > 0
+      ? conceptRetention.reduce((sum, c) => sum + (c.retention ?? 0), 0) /
+        conceptRetention.length
       : null;
 
   const weakest = [...conceptRetention]

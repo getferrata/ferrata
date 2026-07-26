@@ -124,6 +124,20 @@ const intakeHandler: JobHandler = async (payload) => {
         })
         .run();
     }
+
+    // What intake read and set aside. Budget triage adds its own cuts later;
+    // these are the earlier, larger ones, and they used to vanish without trace.
+    for (const s of result.outOfScope ?? []) {
+      tx.insert(cutsT)
+        .values({
+          id: newId("cut"),
+          courseId: id,
+          conceptId: "intake",
+          title: s.title,
+          reason: s.reason,
+        })
+        .run();
+    }
   });
 
   return { conceptCount: result.candidateConcepts.length, deadline: result.deadline };
@@ -442,7 +456,13 @@ async function generateOneModule(
     const report = await evalModule(
       concrete.bodyMd,
       { anchorTerms: anchors, domain: course.domain ?? "" },
-      { sourcePrompt: course.sourcePrompt, conceptTitle: concept.title },
+      {
+        sourcePrompt: course.sourcePrompt,
+        conceptTitle: concept.title,
+        // The same material the module was written from, so the judge can tell
+        // an honest gap from a confident invention.
+        sources,
+      },
       id,
     );
 

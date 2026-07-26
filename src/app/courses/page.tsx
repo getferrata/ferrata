@@ -29,12 +29,14 @@ export default async function CoursesPage() {
     <>
       <SiteHeader
         right={
-          <Link
-            href="/crea"
-            className="text-step--1 text-text-muted underline underline-offset-2 hover:text-text"
-          >
-            New route
-          </Link>
+          user.role === "examiner" ? (
+            <Link
+              href="/crea"
+              className="text-step--1 text-text-muted underline underline-offset-2 hover:text-text"
+            >
+              New route
+            </Link>
+          ) : undefined
         }
       />
       <main className="mx-auto max-w-3xl px-6 py-12">
@@ -67,20 +69,29 @@ export default async function CoursesPage() {
             <p className="font-serif text-step-1 text-text">
               No routes yet.
             </p>
-            <p className="mt-2 max-w-measure text-step-0 text-text-muted">
-              Start from a topic and your material, or import a package.
-            </p>
-            <div className="mt-4 flex gap-4 text-step-0">
-              <Link href="/crea" className="text-accent underline underline-offset-2">
-                Create a route
-              </Link>
-              <Link
-                href="/import"
-                className="text-accent underline underline-offset-2"
-              >
-                Import a course
-              </Link>
-            </div>
+            {user.role === "examiner" ? (
+              <>
+                <p className="mt-2 max-w-measure text-step-0 text-text-muted">
+                  Start from a topic and your material, or import a package.
+                </p>
+                <div className="mt-4 flex gap-4 text-step-0">
+                  <Link href="/crea" className="text-accent underline underline-offset-2">
+                    Create a route
+                  </Link>
+                  <Link
+                    href="/import"
+                    className="text-accent underline underline-offset-2"
+                  >
+                    Import a course
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <p className="mt-2 max-w-measure text-step-0 text-text-muted">
+                Nothing has been assigned to you yet. Whoever set up this install
+                will add you to a route, and it will show up here.
+              </p>
+            )}
           </div>
         ) : (
           <ul className="mt-8 flex flex-col gap-3">
@@ -122,7 +133,11 @@ function CourseRow({ c }: { c: CourseSummary }) {
         <p className="mt-1 text-step--1 text-text-muted">
           {ready
             ? `${c.moduleCount} modules · ${c.testedCount}/${c.questionCount} questions attempted`
-            : "building"}
+            : c.status === "failed"
+              ? c.moduleCount > 0
+                ? `stopped with ${c.moduleCount} ${c.moduleCount === 1 ? "module" : "modules"} written · open it to carry on`
+                : "stopped before anything was written · open it to try again"
+              : "building"}
           {c.origin === "imported" ? " · imported" : ""}
         </p>
       </Link>

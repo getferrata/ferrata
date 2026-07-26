@@ -100,7 +100,7 @@ export function buildPackage(
   const { course, modules, edges, cuts } = bundle;
   const context = course.authorContextMd ?? course.sourcePrompt;
 
-  return {
+  const pkg: FerrataPackage = {
     manifest: {
       format: FERRATA_FORMAT,
       version: FERRATA_VERSION,
@@ -153,4 +153,34 @@ export function buildPackage(
     ),
     cuts: cuts.map((c) => ({ title: c.title, reason: c.reason })),
   };
+
+  assertNoProtectedValues(pkg, bundle.restorations);
+  return pkg;
+}
+
+/**
+ * Refuse to hand out a package that carries a Contextia-protected value.
+ *
+ * The pipeline already keeps them out: the model only ever sees the ⟨cxt:hash⟩
+ * placeholder, so a module cannot hold the real host unless something upstream
+ * changed. Checking here is cheap, and it sits inside buildPackage rather than
+ * beside one of its callers because the two export routes are easy to guard
+ * unevenly. It turns "we tested that it does not leak" into "it cannot leak
+ * without the export failing".
+ */
+export function assertNoProtectedValues(
+  pkg: FerrataPackage,
+  restorations: readonly { value: string; label: string }[],
+): void {
+  if (restorations.length === 0) return;
+  const serialised = JSON.stringify(pkg);
+  const leaked = restorations.filter(
+    (r) => r.value.length > 3 && serialised.includes(r.value),
+  );
+  if (leaked.length === 0) return;
+  throw new Error(
+    `Export refused: the package would carry ${leaked.length} protected value(s) in clear (${leaked
+      .map((r) => r.label)
+      .join(", ")}). Nothing was written.`,
+  );
 }

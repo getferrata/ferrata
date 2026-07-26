@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { concepts, courses } from "@/db/schema";
+import { concepts, courses, cuts } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
 import { enqueue } from "@/lib/jobs/queue";
+import { newId } from "@/lib/util/id";
 
 export const runtime = "nodejs";
 
@@ -20,8 +21,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id } = await params;
+  // This resumes the pipeline, which spends. A course with no owner (seed or
+  // pre-upgrade) would otherwise let any signed-in account start a build.
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "not authenticated" }, { status: 401 });
+  if (user.role !== "examiner") {
+    return NextResponse.json({ error: "examiners only" }, { status: 403 });
+  }
 
   const course = db.select().from(courses).where(eq(courses.id, id)).get();
   if (!course) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -51,9 +57,29 @@ export async function POST(
   }
 
   if (dropIds.length > 0) {
-    db.delete(concepts)
+    const dropped = db
+      .select({ id: concepts.id, title: concepts.title })
+      .from(concepts)
       .where(and(eq(concepts.courseId, id), inArray(concepts.id, dropIds)))
-      .run();
+      .all();
+    db.transaction((tx) => {
+      // Recorded, not just deleted: the student is shown what the course leaves
+      // out, and an unchecked concept belongs on that list like any other cut.
+      for (const c of dropped) {
+        tx.insert(cuts)
+          .values({
+            id: newId("cut"),
+            courseId: id,
+            conceptId: c.id,
+            title: c.title,
+            reason: "the author removed it before the modules were written.",
+          })
+          .run();
+      }
+      tx.delete(concepts)
+        .where(and(eq(concepts.courseId, id), inArray(concepts.id, dropIds)))
+        .run();
+    });
   }
   db.update(courses).set({ status: "graphing" }).where(eq(courses.id, id)).run();
   enqueue("build_graph", { courseId: id, actorUserId: user.id });

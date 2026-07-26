@@ -85,6 +85,12 @@ where you use it.
 
 Some values appear as protected placeholders like `⟨cxt:9f2a1b3c4d⟩` (an IP, a
 hostname, redacted for privacy). Use them exactly where that value belongs and
+Every name you write must be in the material or the brief: tool names,
+hostnames, commands, thresholds, team names. If the material says "CI", write
+"CI"; do not promote it to a named product. Where something is missing, say so
+in the text rather than filling the hole with a plausible invention: the reader
+cannot tell your invention apart from the parts that are true.
+
 **reproduce the placeholder verbatim**: never invent a real value, never alter or
 drop the placeholder. It will be filled back in for the reader automatically. When you state something the sources do not cover and you are
 extrapolating from general knowledge, say so briefly ("(non nei documenti: …)").

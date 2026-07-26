@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scanSensitivity } from "@/lib/sources/dlp";
+import { clusterOverlaps, scanSensitivity } from "@/lib/sources/dlp";
 
 describe("scanSensitivity (Contextia DLP gate)", () => {
   it("passes clean text through as public with no redactions", async () => {
@@ -84,5 +84,87 @@ describe("scanSensitivity (Contextia DLP gate)", () => {
     const r = await scanSensitivity(text, "runbook.md", "block");
     expect(r.blocked).toBe(false); // no critical secrets → still usable
     expect(r.restorations.length).toBe(1);
+  });
+});
+
+describe("what the engine could not read", () => {
+  it("refuses a file it could only scan part of, instead of calling it clean", async () => {
+    // The engine caps how much it reads. On a longer file an empty result means
+    // "nothing in the part we read", and treating that as clean would send the
+    // unread tail to the model and into every export.
+    const secret = "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+    const text = "a".repeat(1_000_001) + "\n" + secret;
+    const r = await scanSensitivity(text, "huge.md");
+    expect(r.blocked).toBe(true);
+    expect(r.verdict!.level).toBe("restricted");
+    expect(r.verdict!.findings[0]!.rationale).toMatch(/not checked|split/i);
+  });
+
+  it("blocks on an unread tail even in redact mode, which normally never blocks", async () => {
+    const r = await scanSensitivity("b".repeat(1_000_001), "huge.md", "redact");
+    expect(r.blocked).toBe(true);
+  });
+
+  it("still scans a file that fits", async () => {
+    const r = await scanSensitivity("x".repeat(999_000), "big.md");
+    expect(r.blocked).toBe(false);
+    expect(r.verdict!.level).toBe("public");
+  });
+});
+
+describe("findings that overlap", () => {
+  const at = (
+    type: string,
+    severity: "critical" | "warning",
+    start: number,
+    end: number,
+  ) => ({
+    id: `${type}:${start}:${end}`,
+    type,
+    label: type,
+    severity,
+    start,
+    end,
+    match: "x".repeat(end - start),
+    rationale: "",
+  });
+
+  // Synthetic findings on purpose: no detector pair in the engine produces this
+  // shape today, which is exactly why the assumption needs a test rather than a
+  // reader's confidence.
+  it("covers the union, so a partly overlapped secret keeps no tail in clear", () => {
+    const out = clusterOverlaps([
+      at("email", "warning", 0, 20),
+      at("aws_secret_access_key", "critical", 15, 60),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.start).toBe(0);
+    expect(out[0]!.end).toBe(60);
+  });
+
+  it("names the cluster after the more serious member, so it is not restored", () => {
+    const out = clusterOverlaps([
+      at("private_ip", "warning", 0, 20),
+      at("aws_secret_access_key", "critical", 10, 30),
+    ]);
+    expect(out[0]!.type).toBe("aws_secret_access_key");
+  });
+
+  it("leaves findings that do not touch alone", () => {
+    const out = clusterOverlaps([
+      at("private_ip", "warning", 0, 8),
+      at("private_ip", "warning", 20, 28),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("redacts a secret and a private IP that sit in one connection string", async () => {
+    const text = "DATABASE_URL=postgres://admin:hunter2@10.0.0.5:5432/payments";
+    const r = await scanSensitivity(text, "env.md");
+    expect(r.text).not.toContain("hunter2");
+    expect(r.text).not.toContain("10.0.0.5");
+    for (const restoration of r.restorations) {
+      expect(restoration.value).not.toContain("hunter2");
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { AnthropicProvider } from "./providers/anthropic";
-import { OpenAICompatProvider } from "./providers/openai-compat";
+import { OpenAICompatProvider, isGroqKey } from "./providers/openai-compat";
 import { OllamaProvider } from "./providers/ollama";
 import { LlmConfigError, type LlmProvider } from "./provider";
 
@@ -63,9 +63,14 @@ function readEnv(e: Env, name: string, fallback: string): string {
   return v && v.trim() ? v.trim() : fallback;
 }
 
-/** True when the OpenAI-compatible slot is being driven by a Groq key alone. */
+/**
+ * True when the OpenAI-compatible slot is driven by a Groq key. Detected by the
+ * key's shape: Settings offers one field for every OpenAI-style provider, so a
+ * Groq key normally arrives in OPENAI_API_KEY, and picking gpt-4o model ids for
+ * it fails every call.
+ */
 function isGroq(e: Env): boolean {
-  return !e.OPENAI_API_KEY && Boolean(e.GROQ_API_KEY);
+  return isGroqKey(e.OPENAI_API_KEY) || (!e.OPENAI_API_KEY && isGroqKey(e.GROQ_API_KEY));
 }
 
 /** Model id for a (provider, tier) pair. All overridable by env. */

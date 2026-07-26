@@ -37,6 +37,25 @@ Return a single JSON object (no prose, no code fences).
    **priority** (critical|high|medium|low, relative to the student's goal and
    deadline: a same-day interview weights differently than a certification),
    **estimatedMinutes**, **depthLevel** (0 for-dummies … 3 operational).
+10. **outOfScope**: what the material covers and you are deliberately leaving
+    out. See below. Return `[]` only if you left nothing out.
+
+## Say what you left out
+
+The next section tells you to drop things. Dropping them is right; dropping them
+in silence is not. A student who is handed a course built from a runbook assumes
+the course covers the runbook. If a whole section of the material is not in the
+path, they will find out the day it matters.
+
+So: every time you decide a chunk of the material does not become a concept, put
+it in **outOfScope** with the reason, in the material's language.
+
+- title: what it is, as the material calls it ("Appendice B: riconciliazione PSP")
+- reason: why this student does not need it now ("gestita dal team Finance, non
+  tocca il rilascio"), or why the deadline does not reach it
+
+Do not list things the material never mentioned. This is not a disclaimer, it is
+the honest inventory of what you read and set aside.
 
 ## Spend the budget on the GAP, not the syllabus (most important)
 

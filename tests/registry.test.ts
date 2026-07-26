@@ -48,3 +48,34 @@ describe("planTask provider/model resolution", () => {
     expect(planTask("write_module", e).providerName).toBe("ollama");
   });
 });
+
+describe("a Groq key pasted into the OpenAI slot", () => {
+  // Settings offers one field for every OpenAI-style provider, so this is how a
+  // Groq key actually arrives. Before, it was sent to api.openai.com asking for
+  // gpt-4o, and every call failed.
+  it("picks Groq model ids", () => {
+    const plan = planTask("write_module", {
+      FERRATA_LLM_OVERRIDE: "openai",
+      OPENAI_API_KEY: "gsk_abc123",
+    });
+    expect(plan.providerName).toBe("openai");
+    expect(plan.model).toBe("llama-3.3-70b-versatile");
+  });
+
+  it("still picks OpenAI model ids for a real OpenAI key", () => {
+    const plan = planTask("write_module", {
+      FERRATA_LLM_OVERRIDE: "openai",
+      OPENAI_API_KEY: "sk-proj-abc123",
+    });
+    expect(plan.model).toBe("gpt-4o");
+  });
+
+  it("lets an explicit model override win either way", () => {
+    const plan = planTask("write_module", {
+      FERRATA_LLM_OVERRIDE: "openai",
+      OPENAI_API_KEY: "gsk_abc123",
+      OPENAI_MODEL_HEAVY: "moonshotai/kimi-k2-instruct",
+    });
+    expect(plan.model).toBe("moonshotai/kimi-k2-instruct");
+  });
+});

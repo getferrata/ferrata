@@ -11,6 +11,7 @@ import {
   setSetting,
 } from "@/lib/settings";
 import { planTask } from "@/lib/llm/registry";
+import { providerHealth } from "@/lib/llm/health";
 
 export const runtime = "nodejs";
 
@@ -37,6 +38,9 @@ export async function GET(): Promise<NextResponse> {
   // What generation would actually use right now, for the "active" banner.
   const heavy = planTask("write_module");
   const light = planTask("triage");
+  // …and whether that plan would survive contact with a first call. Resolution
+  // always lands somewhere, so the plan alone says nothing about readiness.
+  const health = await providerHealth(heavy.providerName, heavy.model);
 
   return NextResponse.json({
     values,
@@ -46,6 +50,8 @@ export async function GET(): Promise<NextResponse> {
     active: {
       heavy: { provider: heavy.providerName, model: heavy.model },
       light: { provider: light.providerName, model: light.model },
+      ready: health.ok,
+      problem: health.ok ? null : health.reason,
     },
   });
 }

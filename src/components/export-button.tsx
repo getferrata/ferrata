@@ -35,7 +35,9 @@ export function ExportButton({
         </a>
         <p className="text-step--1 text-text-muted">
           A <code className="mono">.ferrata.json</code> file to move and import
-          from <code className="mono">/import</code>.
+          from <code className="mono">/import</code>. Protected values stay
+          behind: addresses and internal hostnames travel as placeholders, and
+          the file carries nothing that resolves them.
         </p>
       </div>
     );

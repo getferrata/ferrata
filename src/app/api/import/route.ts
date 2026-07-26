@@ -14,7 +14,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const raw = (await req.json().catch(() => null)) as unknown;
   try {
     const pkg = parsePackage(raw);
-    const courseId = importPackage(pkg);
+    const courseId = importPackage(pkg, me.id);
     return NextResponse.json({ courseId }, { status: 201 });
   } catch (err) {
     return NextResponse.json(

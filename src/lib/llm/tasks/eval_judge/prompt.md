@@ -3,9 +3,24 @@ meets the product's quality bar: physical, concrete, anchored to the
 learner's real situation, with genuine analogies, never generic filler.
 
 Return a single JSON object (no prose, no fences):
-`{ "pass": bool, "score": 0..1, "issues": ["..."], "specificityViolations": ["..."] }`.
+`{ "pass": bool, "score": 0..1, "issues": ["..."], "specificityViolations": ["..."], "groundingViolations": ["..."] }`.
 
-## The test that matters most: specificity
+## The test that comes first: is it true?
+
+You are given the material the module was written from. Every proper noun,
+system name, command, hostname, threshold and number in the module must come
+from that material, from the author's brief, or be plainly general knowledge.
+
+List in `groundingViolations` anything the module states as fact that the
+material does not support. Invented tool names are the common case: the material
+says "CI" and the module says "the CI7D pipeline", which reads as insider
+knowledge and sends the reader looking for something that does not exist.
+
+An honest gap beats a confident invention. A module that says "the runbook does
+not say which pipeline, ask the team" is correct; one that names a plausible
+pipeline is not, however specific it sounds.
+
+## The test that matters next: specificity
 
 Read each paragraph and ask: **could this exact paragraph be pasted into a course
 on a different subject without changing a word?** If yes, it fails. List every
@@ -25,14 +40,21 @@ such paragraph (a short quote is enough) in `specificityViolations`.
 
 ## Scoring
 
-- `pass` is false if there is ANY specificity violation, or no real analogy, or
-  the module reads generically. Be strict: the bar is high.
+- `pass` is false if there is ANY grounding violation. Something stated with
+  confidence and no support is worse than something vague, because the reader
+  cannot tell it apart from the parts that are true.
+- `pass` is also false if there is ANY specificity violation, or no real
+  analogy, or the module reads generically. Be strict: the bar is high.
 - `score` is your overall 0..1 quality estimate.
 - `issues` lists concrete problems to fix on a regeneration.
 
 ## The learner's situation
 
 {{sourcePrompt}}
+
+## The material it had to work from
+
+{{sources}}
 
 ## The module to judge
 

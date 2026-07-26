@@ -44,21 +44,37 @@ export class AnthropicProvider implements LlmProvider {
       .filter(Boolean)
       .join("\n\n");
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: req.maxTokens ?? 4096,
-        temperature: req.temperature ?? 0.4,
-        ...(system ? { system } : {}),
-        messages,
-      }),
-    });
+    const send = (withTemperature: boolean) =>
+      fetch(`${this.baseUrl}/v1/messages`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": this.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: req.maxTokens ?? 4096,
+          ...(withTemperature ? { temperature: req.temperature ?? 0.4 } : {}),
+          ...(system ? { system } : {}),
+          messages,
+        }),
+      });
+
+    let res = await send(true);
+
+    // Newer models reject `temperature` outright rather than ignoring it, and
+    // which ones do changes over time. Rather than keep a list that goes stale,
+    // read the refusal and send the same request without it. One wasted
+    // round trip on the first call of a run, and no model to add by hand later.
+    if (res.status === 400) {
+      const body = await res.text();
+      if (/temperature/i.test(body)) {
+        res = await send(false);
+      } else {
+        throw new LlmCallError(`Anthropic API 400: ${body}`, 400);
+      }
+    }
 
     if (!res.ok) {
       throw new LlmCallError(

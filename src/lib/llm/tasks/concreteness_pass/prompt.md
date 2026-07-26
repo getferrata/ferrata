@@ -19,6 +19,19 @@ questions that compact implies (for physical/business domains: *where does it
 physically sit?* and *who pays whom?*, or the domain's equivalent: who decides,
 who profits, who complains when it breaks).
 
+## Where the specifics must come from
+
+Everything you name has to exist in the material below or in the author's brief.
+Tool names, hostnames, commands, thresholds, team names, numbers: none of them
+may be produced by you.
+
+This is the trap in this job. Asked to be concrete, it is tempting to turn "the
+CI pipeline" into "the CI7D pipeline", which reads better and is a lie the
+reader cannot detect. If the material does not name the thing, say what is
+missing instead: "the runbook does not say which pipeline; ask the team". A
+stated gap is useful. An invented name sends someone searching for something
+that was never there.
+
 ## What to do
 
 - If a paragraph asserts something abstract without answering those questions,
@@ -27,6 +40,7 @@ who profits, who complains when it breaks).
 - If a concept genuinely has **no sensible physical answer**, do NOT invent one.
   Say so plainly in the text ("this one is genuinely abstract: …") and move on.
 - Do not add new sections or padding. This is an edit, not a rewrite from scratch.
+- Never introduce a name, number or command that is not in the material.
 - Preserve markdown structure, code blocks, and tables.
 
 In `notes`, list each change as a short line: what you made concrete, or what you

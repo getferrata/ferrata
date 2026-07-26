@@ -49,12 +49,17 @@ export function previewPackage(pkg: FerrataPackage): PackagePreview {
 }
 
 /**
- * Import a validated package as a new course. Marked `origin: imported` and
- * `trusted: false`. The content is untrusted and carries no
- * student state (reviews are never in the package). Concept ids are remapped to
- * fresh ones so an import can't collide with existing courses.
+ * Import a validated package as a new course owned by `ownerId`. Marked
+ * `origin: imported` and `trusted: false`: the content is untrusted until
+ * someone reads it, and carries no student state, since reviews are never in a
+ * package. Concept ids are remapped so an import cannot collide with an
+ * existing course.
+ *
+ * The owner is required rather than optional. A course with none is visible to
+ * everyone on the install, which is right for the seeded demo and wrong for
+ * something an examiner just imported.
  */
-export function importPackage(pkg: FerrataPackage): string {
+export function importPackage(pkg: FerrataPackage, ownerId: string): string {
   const courseId = newId("course");
   const idMap = new Map<string, string>();
   for (const c of pkg.graph.concepts) idMap.set(c.id, newId("concept"));
@@ -63,6 +68,7 @@ export function importPackage(pkg: FerrataPackage): string {
     tx.insert(coursesT)
       .values({
         id: courseId,
+        ownerId,
         title: pkg.manifest.title,
         sourcePrompt: pkg.context,
         authorContextMd: pkg.context,

@@ -12,6 +12,11 @@ import {
  */
 const REQUEST_TIMEOUT_MS = 90_000;
 
+/** Groq keys are `gsk_...`; no other OpenAI-compatible host uses that prefix. */
+export function isGroqKey(key: string | undefined): boolean {
+  return Boolean(key?.trim().startsWith("gsk_"));
+}
+
 export class OpenAICompatProvider implements LlmProvider {
   readonly name = "openai" as const;
 
@@ -26,9 +31,10 @@ export class OpenAICompatProvider implements LlmProvider {
       throw new LlmConfigError("OPENAI_API_KEY or GROQ_API_KEY is not set");
     }
     this.apiKey = key;
-    const groqOnly =
-      !process.env.OPENAI_API_KEY && Boolean(process.env.GROQ_API_KEY);
-    const fallbackUrl = groqOnly
+    // Recognise a Groq key by its shape, not by which variable it was put in.
+    // Settings offers one "OpenAI and compatible" slot, so a Groq key arrives in
+    // OPENAI_API_KEY and would otherwise be sent to api.openai.com.
+    const fallbackUrl = isGroqKey(key)
       ? "https://api.groq.com/openai/v1"
       : "https://api.openai.com/v1";
     this.baseUrl = (process.env.OPENAI_BASE_URL ?? fallbackUrl).replace(

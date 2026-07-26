@@ -13,6 +13,8 @@ interface Config {
   active: {
     heavy: { provider: string; model: string };
     light: { provider: string; model: string };
+    ready: boolean;
+    problem: string | null;
   };
   encryptionEnabled: boolean;
 }
@@ -227,16 +229,35 @@ export function LlmSettingsForm() {
 
   return (
     <div className="mt-10 flex flex-col gap-10">
-      <div className="rounded border border-border bg-bg-subtle px-4 py-3 text-step--1 text-text-muted">
-        Generation now uses{" "}
-        <strong className="text-text">
-          {cfg.active.heavy.provider} · {cfg.active.heavy.model}
-        </strong>{" "}
-        for writing and{" "}
-        <strong className="text-text">
-          {cfg.active.light.provider} · {cfg.active.light.model}
-        </strong>{" "}
-        for light tasks.
+      <div
+        className={`rounded border px-4 py-3 text-step--1 text-text-muted ${
+          cfg.active.ready
+            ? "border-border bg-bg-subtle"
+            : "border-accent bg-bg-subtle"
+        }`}
+      >
+        {cfg.active.ready ? (
+          <>
+            Generation uses{" "}
+            <strong className="text-text">
+              {cfg.active.heavy.provider} · {cfg.active.heavy.model}
+            </strong>{" "}
+            for writing and{" "}
+            <strong className="text-text">
+              {cfg.active.light.provider} · {cfg.active.light.model}
+            </strong>{" "}
+            for light tasks.
+          </>
+        ) : (
+          <>
+            <strong className="text-text">No usable model yet.</strong> A build
+            would fall back to{" "}
+            <strong className="text-text">
+              {cfg.active.heavy.provider} · {cfg.active.heavy.model}
+            </strong>
+            , but {cfg.active.problem}
+          </>
+        )}
       </div>
 
       {cfg.encryptionEnabled ? (

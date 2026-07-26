@@ -97,3 +97,23 @@ export function retrievability(
   if (!stored) return 0;
   return f.get_retrievability(toCard(stored, now), now, false) as number;
 }
+
+/**
+ * How much a single answered question counts towards readiness.
+ *
+ * A wrong answer counts as nothing, however recent. FSRS retrievability is a
+ * function of time since the last review, so straight after answering it reads
+ * near 1 whether the answer was right or wrong: right for deciding when to ask
+ * again, wrong for "do they know this now". Getting it wrong five minutes ago
+ * is the clearest evidence there is that they do not.
+ *
+ * A correct answer counts as its retrievability, so it decays if never revisited.
+ */
+export function knowledgeHeld(
+  card: StoredCard | null,
+  correct: boolean,
+  at: Date,
+): number {
+  if (!correct) return 0;
+  return retrievability(card, at);
+}

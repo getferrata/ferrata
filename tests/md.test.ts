@@ -127,3 +127,13 @@ describe("renderMarkdown", () => {
     expect(html).toContain("valore protetto");
   });
 });
+
+describe("a course that arrived from someone else", () => {
+  it("shows a neutral marker where the placeholders are, not raw token syntax", () => {
+    // The importing instance holds no restore map for this course. Until this
+    // was handled, the reader saw the literal token.
+    const html = renderMarkdown("Il db è ⟨cxt:ab12cd34ef⟩ in produzione.");
+    expect(html).not.toContain("cxt:ab12cd34ef");
+    expect(html).toContain("•••");
+  });
+});

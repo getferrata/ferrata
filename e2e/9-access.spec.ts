@@ -36,6 +36,8 @@ const PRIVILEGED_POSTS = (id: string) => [
   { url: `/api/courses/${id}/enroll`, body: { email: "x@y.z" } },
   { url: `/api/courses/${id}/interview`, body: { answers: {} } },
   { url: `/api/courses/${id}/concepts`, body: { dropIds: [] } },
+  { url: `/api/courses/${id}/retry`, body: {} },
+  { url: `/api/courses/${id}/verify`, body: {} },
   { url: "/api/settings/llm", body: { values: {} } },
   { url: "/api/settings/credits", body: { limit: "1" } },
   { url: "/api/settings/llm/test", body: {} },

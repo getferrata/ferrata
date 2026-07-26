@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RetryBuild } from "@/components/retry-build";
 import { useRouter } from "next/navigation";
 import { ConceptGraph } from "@/components/concept-graph";
 import {
@@ -107,6 +108,17 @@ export function PipelineProgress({ id }: { id: string }) {
     const dailyCap = /per day|TPD|al giorno|tokens per day/i.test(raw);
     const rateLimited =
       dailyCap || /rate.?limit|429|tokens per minute|TPM/i.test(raw);
+    // Which provider actually refused, so the advice matches the failure. The
+    // generic text used to send everyone to check Ollama, including people
+    // whose Anthropic key had just returned a 400.
+    const provider = /anthropic/i.test(raw)
+      ? "anthropic"
+      : /ollama/i.test(raw)
+        ? "ollama"
+        : /openai|groq/i.test(raw)
+          ? "openai"
+          : null;
+    const badKey = /401|403|invalid.?api.?key|authentication/i.test(raw);
     return (
       <div className="flex flex-col gap-8">
         <AuthoringSteps current={4} failed />
@@ -132,13 +144,45 @@ export function PipelineProgress({ id }: { id: string }) {
               generation is slower. To go faster: a model with higher limits (
               <code>OPENAI_MODEL_HEAVY</code>) or Groq&rsquo;s Dev tier.
             </p>
+          ) : badKey ? (
+            <p className="mt-3 text-text-muted">
+              The provider refused the key. Check it under{" "}
+              <a href="/settings" className="text-accent underline underline-offset-2">
+                Settings
+              </a>{" "}
+              with the Test connection button.
+            </p>
+          ) : provider === "ollama" ? (
+            <p className="mt-3 text-text-muted">
+              The local model server did not answer. Check that{" "}
+              <code>ollama serve</code> is running and the model is pulled, or
+              set an API key under{" "}
+              <a href="/settings" className="text-accent underline underline-offset-2">
+                Settings
+              </a>
+              .
+            </p>
+          ) : provider ? (
+            <p className="mt-3 text-text-muted">
+              The model provider refused the call. The reason it gave is under
+              Technical detail below. If it names a setting, change it under{" "}
+              <a href="/settings" className="text-accent underline underline-offset-2">
+                Settings
+              </a>{" "}
+              and build again: what is written so far is kept.
+            </p>
           ) : (
             <p className="mt-3 text-text-muted">
-              A model call failed. With the default configuration, generation runs
-              on Ollama locally. Check that <code>ollama serve</code> is running,
-              or set an API key in <code>.env.local</code>.
+              A model call failed. The reason is under Technical detail below.
+              Check the model configuration under{" "}
+              <a href="/settings" className="text-accent underline underline-offset-2">
+                Settings
+              </a>{" "}
+              with the Test connection button.
             </p>
           )}
+          <RetryBuild courseId={id} writtenModules={data?.modulesDone ?? 0} />
+
           {raw ? (
             <details className="mt-4">
               <summary className="cursor-pointer select-none text-step--1 text-text-muted">
@@ -376,14 +420,18 @@ function InterviewForm({
 interface SetupCost {
   configured: boolean;
   active: { provider: string; model: string };
-  cost: { baseUsd: number; perModuleUsd: number };
+  cost: { baseUsd: number; perModuleUsd: number; measured?: boolean };
 }
 
 function buildCostLine(setup: SetupCost, modules: number): string {
   const usd = setup.cost.baseUsd + setup.cost.perModuleUsd * modules;
   if (usd <= 0) return `Estimated cost: free (local model)`;
   const s = usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
-  return `Estimated cost: ~${s} once, on your key at cost`;
+  // Say where the figure comes from. A number measured on this install is
+  // worth more than one from a table, and a reader deserves to know which.
+  return setup.cost.measured
+    ? `Estimated cost: ~${s} once, on your key at cost · from what your own courses have cost so far`
+    : `Estimated cost: ~${s} once, on your key at cost · a rough figure until this install has built a few courses`;
 }
 
 function ConceptReview({

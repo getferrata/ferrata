@@ -17,12 +17,13 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "bench:context": "tsx benchmarks/lib/compare-context.ts",
     "test:e2e": "playwright test",
     "db:seed:demo": "tsx src/db/seed-demo.ts",
     "audit:deps": "node scripts/audit-deps.mjs"
   },
   "dependencies": {
-    "@sbr0nch/contextia-engine": "^1.2.0",
+    "@sbr0nch/contextia-engine": "^2.0.2",
     "better-sqlite3": "^11.8.1",
     "drizzle-orm": "^0.45.2",
     "jsonrepair": "^3.15.0",

@@ -15,7 +15,7 @@ interface SetupInfo {
   configured: boolean;
   reason: string | null;
   active: { provider: string; model: string };
-  cost: { baseUsd: number; perModuleUsd: number };
+  cost: { baseUsd: number; perModuleUsd: number; measured?: boolean };
 }
 
 /** Course cost for a typical build, shown before committing. */

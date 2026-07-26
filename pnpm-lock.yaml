@@ -9,17 +9,17 @@ overrides:
   postcss: '>=8.5.22'
 
 patchedDependencies:
-  '@sbr0nch/contextia-engine@1.2.0':
+  '@sbr0nch/contextia-engine@2.0.2':
     hash: 3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3
-    path: patches/@sbr0nch__contextia-engine@1.2.0.patch
+    path: patches/@sbr0nch__contextia-engine@2.0.2.patch
 
 importers:
 
   .:
     dependencies:
       '@sbr0nch/contextia-engine':
-        specifier: ^1.2.0
-        version: 1.2.0(patch_hash=3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3)
+        specifier: ^2.0.2
+        version: 2.0.2(patch_hash=3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3)
       better-sqlite3:
         specifier: ^11.8.1
         version: 11.10.0
@@ -1075,8 +1075,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@sbr0nch/contextia-engine@1.2.0':
-    resolution: {integrity: sha512-xkGdX6jRvVrEpLf+v8t4ZSPHdQOuOyu55Y5yYSgOyHNWwP0UgI4PWW8vAY8mKlAYGPJ2WcJ2Ir7mb64Y0AXESQ==}
+  '@sbr0nch/contextia-engine@2.0.2':
+    resolution: {integrity: sha512-2LH6gvF8fDpOxohneoFx1mfgTSY4KT6bC+M5v9gXU4pBHXfs9/IAM3L8a0/xLuxV4DOnKApB/Xeyu0BuBa5t3g==}
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -2689,7 +2689,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
 
-  '@sbr0nch/contextia-engine@1.2.0(patch_hash=3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3)': {}
+  '@sbr0nch/contextia-engine@2.0.2(patch_hash=3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3)': {}
 
   '@swc/helpers@0.5.15':
     dependencies:

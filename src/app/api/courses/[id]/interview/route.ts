@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { courses } from "@/db/schema";
 import { enqueue } from "@/lib/jobs/queue";
+import { protectAuthorText } from "@/lib/sources/protect";
 import { getCurrentUser } from "@/lib/auth/session";
 import type { InterviewState } from "@/lib/llm/tasks/interview_questions";
 
@@ -59,10 +60,21 @@ export async function POST(
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 
+  // Asked "which host runs this?", an author answers with the real host. These
+  // answers reach the model and every exported package, so they pass the same
+  // DLP gate as uploaded material, at the level chosen for this course.
+  // `state.answers` keeps what the author typed: it is never sent to a model or
+  // exported, and they should see their own words when they come back to edit.
+  const safeContextMd = await protectAuthorText(
+    id,
+    contextMd,
+    course.contextiaMode ?? undefined,
+  );
+
   db.update(courses)
     .set({
       interviewJson: JSON.stringify(state),
-      authorContextMd: contextMd || null,
+      authorContextMd: safeContextMd || null,
       status: "intake",
     })
     .where(eq(courses.id, id))

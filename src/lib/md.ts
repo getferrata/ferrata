@@ -195,8 +195,9 @@ export function renderMarkdown(
   const linked = opts.glossary?.length
     ? linkGlossaryTerms(withCites, opts.glossary)
     : withCites;
-  const restored = opts.restorations?.length
-    ? restoreProtected(linked, opts.restorations)
-    : linked;
+  // Always run, even with an empty restore map: an imported course carries the
+  // placeholders but not the values, and that reader must see a neutral marker
+  // rather than raw token syntax.
+  const restored = restoreProtected(linked, opts.restorations ?? []);
   return sanitizeHtml(restored, SANITIZE_OPTS);
 }

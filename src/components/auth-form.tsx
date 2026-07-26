@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FerrataMark } from "@/components/brand";
 
 type Mode = "login" | "register";
@@ -23,7 +22,6 @@ export function AuthForm({
   /** True when someone arriving at /register could actually get an account. */
   canRegister?: boolean;
 }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -50,10 +48,16 @@ export function AuthForm({
         courseId?: string;
       };
       if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
-      // Invited → straight into the course; otherwise the role's home.
-      if (data.courseId) router.push(`/courses/${data.courseId}`);
-      else router.push(data.role === "examiner" ? "/examiner" : "/courses");
-      router.refresh();
+      // A full page load, not a client-side push: the session is a cookie the
+      // server reads while rendering, and a soft navigation can paint a page
+      // that was prepared before the cookie existed, which looked like the
+      // button hanging on "…".
+      const dest = data.courseId
+        ? `/courses/${data.courseId}`
+        : data.role === "examiner"
+          ? "/examiner"
+          : "/courses";
+      window.location.assign(dest);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error");
       setBusy(false);

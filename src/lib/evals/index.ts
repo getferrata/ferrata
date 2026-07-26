@@ -12,13 +12,18 @@ export interface EvalReport {
 
 /**
  * Evaluate a generated module: mechanical rubrics (always) + LLM judge (best
- * effort). A module that fails is regenerated, not published. The
- * specificity gate and any judge specificity violation both fail the module.
+ * effort). A module that fails is regenerated, not published. The specificity
+ * gate, a judge specificity violation, and anything the module states that the
+ * material does not, all fail it.
+ *
+ * `sources` is the material the module was written from. Without it the judge
+ * could only ask whether the text sounded specific, which rewards a confident
+ * invention over an honest gap.
  */
 export async function evalModule(
   bodyMd: string,
   ctx: ModuleContext,
-  judgeArgs: { sourcePrompt: string; conceptTitle: string },
+  judgeArgs: { sourcePrompt: string; conceptTitle: string; sources: string },
   courseId?: string,
 ): Promise<EvalReport> {
   const rubrics = runRubrics(bodyMd, ctx);
@@ -33,7 +38,9 @@ export async function evalModule(
   }
 
   const judgePass = judge
-    ? judge.pass && judge.specificityViolations.length === 0
+    ? judge.pass &&
+      judge.specificityViolations.length === 0 &&
+      judge.groundingViolations.length === 0
     : true;
   const pass = rubrics.pass && judgePass;
   const score = judge ? (rubrics.score + judge.score) / 2 : rubrics.score;

@@ -148,7 +148,9 @@ export default async function ModulePage({
           conceptTitle={view.concept.title}
         />
 
-        {isVideoEnabled() ? (
+        {/* A ref added here is stored on the concept, so it changes the module
+            for everyone on the course. Learners read the annex, authors edit it. */}
+        {isVideoEnabled() && viewer.role === "examiner" ? (
           <VideoAnnex
             courseId={id}
             conceptId={view.concept.id}
