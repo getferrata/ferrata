@@ -17,7 +17,6 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "bench:context": "tsx benchmarks/lib/compare-context.ts",
     "test:e2e": "playwright test",
     "db:seed:demo": "tsx src/db/seed-demo.ts",
     "audit:deps": "node scripts/audit-deps.mjs"
