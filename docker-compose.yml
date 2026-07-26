@@ -1,0 +1,18 @@
+services:
+  ferrata:
+    build: .
+    image: ghcr.io/getferrata/ferrata:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ferrata-data:/data
+    restart: unless-stopped
+    # Model access can also be configured later in the in-app Settings page.
+    # environment:
+    #   ANTHROPIC_API_KEY: "..."
+    #   OPENAI_API_KEY: "..."
+    #   OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+    #   FERRATA_ALLOW_PRIVATE_URLS: "1"
+
+volumes:
+  ferrata-data:

@@ -1,0 +1,39 @@
+{
+  "updated": "2026-07",
+  "providers": [
+    {
+      "id": "anthropic",
+      "label": "Anthropic (Claude)",
+      "keyEnv": "ANTHROPIC_API_KEY",
+      "models": [
+        { "id": "claude-opus-5", "label": "Claude Opus 5", "hint": "most capable", "tier": "heavy" },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "hint": "recommended", "tier": "heavy" },
+        { "id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5", "hint": "fast and cheap", "tier": "light" }
+      ]
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI and compatible",
+      "keyEnv": "OPENAI_API_KEY",
+      "models": [
+        { "id": "gpt-5.6", "label": "GPT 5.6", "hint": "most capable", "tier": "heavy" },
+        { "id": "gpt-5.6-terra", "label": "GPT 5.6 Terra", "hint": "balanced", "tier": "heavy" },
+        { "id": "gpt-5.6-luna", "label": "GPT 5.6 Luna", "hint": "fast and cheap", "tier": "light" },
+        { "id": "gpt-5-mini", "label": "GPT 5 Mini", "hint": "budget", "tier": "light" },
+        { "id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B", "hint": "on Groq", "tier": "heavy" },
+        { "id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B", "hint": "on Groq, fast", "tier": "light" }
+      ]
+    },
+    {
+      "id": "ollama",
+      "label": "Local on this machine",
+      "keyEnv": null,
+      "models": [
+        { "id": "qwen2.5:32b-instruct", "label": "Qwen 2.5 32B", "hint": "needs a GPU", "tier": "heavy" },
+        { "id": "qwen2.5:14b-instruct", "label": "Qwen 2.5 14B", "hint": "needs a GPU", "tier": "heavy" },
+        { "id": "llama3.3", "label": "Llama 3.3 70B", "hint": "needs a big GPU", "tier": "heavy" },
+        { "id": "qwen2.5:7b-instruct", "label": "Qwen 2.5 7B", "hint": "modest hardware", "tier": "light" }
+      ]
+    }
+  ]
+}

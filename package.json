@@ -1,0 +1,56 @@
+{
+  "name": "ferrata",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "test:e2e": "playwright test",
+    "db:seed:demo": "tsx src/db/seed-demo.ts",
+    "audit:deps": "node scripts/audit-deps.mjs"
+  },
+  "dependencies": {
+    "@sbr0nch/contextia-engine": "^1.2.0",
+    "better-sqlite3": "^11.8.1",
+    "drizzle-orm": "^0.45.2",
+    "jsonrepair": "^3.15.0",
+    "mammoth": "^1.9.0",
+    "marked": "^15.0.6",
+    "next": "15.5.22",
+    "pdf-parse": "^1.1.1",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "sanitize-html": "^2.14.0",
+    "sharp": "0.35.3",
+    "ts-fsrs": "^4.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.7",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@types/sanitize-html": "^2.13.0",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.30.2",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

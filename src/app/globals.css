@@ -1,0 +1,1027 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   Design tokens: the single source of truth.
+   No component may hardcode a color, size, or spacing value; it references a
+   token. Light and dark are both first-class: people study at night.
+   ========================================================================== */
+
+:root {
+  /* Type families: system stacks only, zero web-font downloads, works offline.
+     Serif for the reading column ("un manuale tecnico ben stampato"); humanist
+     sans for chrome; mono for identifiers, commands, prefixes. */
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Code",
+    Menlo, Consolas, monospace;
+
+  /* Modular type scale (minor third ~1.2), body = 18px. Never 14. */
+  --step--1: 0.9375rem; /* 15px: captions, mono labels */
+  --step-0: 1.125rem; /*   18px: body */
+  --step-1: 1.35rem; /*    ~22px: lead */
+  --step-2: 1.62rem; /*    ~26px: h3 */
+  --step-3: 1.9375rem; /*  ~31px: h2 */
+  --step-4: 2.325rem; /*   ~37px: h1 */
+  --step-5: 2.79rem; /*    ~45px: display */
+
+  --leading-body: 1.6;
+  --leading-snug: 1.4;
+  --leading-heading: 1.2;
+
+  /* Reading measure: hard constraint 60 to 75 characters. */
+  --measure: 68ch;
+
+  --radius: 4px;
+
+  /* --- Light theme: warm paper, alpine signage --- */
+  --bg: #f5f1e8;
+  --bg-subtle: #ece6d8;
+  --surface: #fbf8f1;
+  --border: #d8d0bf;
+  --text: #221f1a;
+  --text-muted: #5f584b;
+  --accent: #a83232;
+  --accent-contrast: #ffffff;
+
+  /* The three semantic learning states: the only chromatic vocabulary.
+     Always paired with an icon/label in the UI; never color alone (WCAG 1.4.1). */
+  --state-solid: #2f6b4f; /* consolidato */
+  --state-doubt: #7a5410; /* in dubbio, darkened to pass 4.5:1 as text on paper */
+  --state-untested: #6e6858; /* non testato */
+  --danger: #8e2a22; /* "sicuro e sbagliato" */
+}
+
+:root[data-theme="dark"],
+.dark {
+  --bg: #17150f;
+  --bg-subtle: #201d16;
+  --surface: #201d16;
+  --border: #37322a;
+  --text: #ece6d8;
+  --text-muted: #a79c87;
+  --accent: #e0705f;
+  --accent-contrast: #1a1712;
+  --state-solid: #6fb58c;
+  --state-doubt: #d3a24a;
+  --state-untested: #9a927e;
+  --danger: #e86a5a;
+}
+
+/* Follow the OS when the user has not chosen explicitly. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17150f;
+    --bg-subtle: #201d16;
+    --surface: #201d16;
+    --border: #37322a;
+    --text: #ece6d8;
+    --text-muted: #a79c87;
+    --accent: #e0705f;
+    --accent-contrast: #1a1712;
+    --state-solid: #6fb58c;
+    --state-doubt: #d3a24a;
+    --state-untested: #9a927e;
+    --danger: #e86a5a;
+  }
+}
+
+/* ==========================================================================
+   Base element styles
+   ========================================================================== */
+
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  line-height: var(--leading-body);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus everywhere (WCAG 2.4.7). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* The distraction-free reading column: serif, constrained measure. */
+.reading {
+  font-family: var(--font-serif);
+  max-width: var(--measure);
+  font-size: var(--step-0);
+  line-height: var(--leading-body);
+}
+
+code,
+kbd,
+samp,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+
+/* ==========================================================================
+   Reading prose: rendered module markdown. Styled to read like a printed
+   technical manual: serif body, generous rhythm, real tables and diagrams.
+   ========================================================================== */
+
+.reading-prose {
+  font-family: var(--font-serif);
+  font-size: var(--step-0);
+  line-height: var(--leading-body);
+  color: var(--text);
+}
+
+.reading-prose > * + * {
+  margin-top: 1rem;
+}
+
+.reading-prose h1,
+.reading-prose h2,
+.reading-prose h3,
+.reading-prose h4 {
+  font-family: var(--font-serif);
+  line-height: var(--leading-heading);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.reading-prose h2 {
+  font-size: var(--step-2);
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.reading-prose h3 {
+  font-size: var(--step-1);
+  margin-top: 1.75rem;
+  color: var(--text);
+}
+
+.reading-prose h4 {
+  font-size: var(--step-0);
+  margin-top: 1.25rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-sans);
+}
+
+.reading-prose p {
+  max-width: var(--measure);
+}
+
+.reading-prose strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reading-prose a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+.reading-prose ul,
+.reading-prose ol {
+  max-width: var(--measure);
+  padding-left: 1.5rem;
+}
+
+.reading-prose ul {
+  list-style: disc;
+}
+.reading-prose ol {
+  list-style: decimal;
+}
+
+.reading-prose li + li {
+  margin-top: 0.35rem;
+}
+
+.reading-prose li::marker {
+  color: var(--text-muted);
+}
+
+/* Analogies and key phrases land in blockquotes: the "note in the margin". */
+.reading-prose blockquote {
+  max-width: var(--measure);
+  border-left: 3px solid var(--accent);
+  padding: 0.25rem 0 0.25rem 1.25rem;
+  color: var(--text);
+  font-style: italic;
+}
+
+.reading-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background-color: var(--bg-subtle);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+/* ASCII diagrams and config snippets: preserve, and scroll rather than wrap. */
+.reading-prose pre {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+}
+
+.reading-prose pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.reading-prose table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+  font-family: var(--font-sans);
+}
+
+.reading-prose th,
+.reading-prose td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.reading-prose thead th {
+  background-color: var(--bg-subtle);
+  font-weight: 600;
+}
+
+.reading-prose hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2rem 0;
+}
+
+/* Inline glossary term: a definition on hover/long-press for jargon the learner
+   might not know. <abbr> is the semantically correct element: screen readers
+   announce the title as the expansion. */
+.reading-prose .term {
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-muted);
+  cursor: help;
+  text-underline-offset: 2px;
+}
+
+/* A value protected by Contextia: hidden from the AI, restored here for the
+   student. Marked in Contextia's green so it's clearly "the model never saw
+   this. It came straight from your source". */
+.reading-prose .cxt {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: #0a5c3e; /* dark green, ≥4.5:1 on the tinted background (light) */
+  background-color: rgba(0, 208, 132, 0.12);
+  border: 1px solid rgba(0, 208, 132, 0.45);
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+  cursor: help;
+}
+@media (prefers-color-scheme: dark) {
+  .reading-prose .cxt {
+    color: #3ee0a6;
+    background-color: rgba(0, 208, 132, 0.16);
+  }
+}
+:root[data-theme="dark"] .reading-prose .cxt {
+  color: #3ee0a6;
+  background-color: rgba(0, 208, 132, 0.16);
+}
+:root[data-theme="light"] .reading-prose .cxt {
+  color: #0a5c3e;
+  background-color: rgba(0, 208, 132, 0.12);
+}
+
+/* "N protetti" badge in the Materiale panel: Contextia green. */
+.cxt-badge {
+  color: #0a5c3e;
+  border: 1px solid rgba(0, 208, 132, 0.55);
+}
+@media (prefers-color-scheme: dark) {
+  .cxt-badge {
+    color: #3ee0a6;
+  }
+}
+:root[data-theme="dark"] .cxt-badge {
+  color: #3ee0a6;
+}
+:root[data-theme="light"] .cxt-badge {
+  color: #0a5c3e;
+}
+
+/* Inline source citation from grounded modules ([fonte: name]). Understated:
+   a provenance marker that says "this is anchored to your material" without
+   breaking the reading line. */
+.reading-prose .cite {
+  font-family: var(--font-sans);
+  font-size: 0.72em;
+  font-style: normal;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15em 0.55em;
+  margin-inline: 0.15em;
+  vertical-align: 0.08em;
+}
+
+/* Movement is near-nil and only orients. Honor the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Marketing landing (public /). A "field manual / via ferrata signage"
+   treatment: a steel cable descends the page with anchor bolts at each pitch,
+   over faint topographic contours. Reuses the app tokens; adds steel + contextia.
+   Deliberately not a stock SaaS look: the craft is the quality signal.
+   ========================================================================== */
+:root {
+  --steel: #55606f;
+  --steel-soft: #8a93a0;
+  --contextia: #0a5c3e;
+  --contextia-tint: rgba(0, 208, 132, 0.12);
+}
+:root[data-theme="dark"],
+.dark {
+  --steel: #8b95a5;
+  --steel-soft: #6b7480;
+  --contextia: #3ee0a6;
+  --contextia-tint: rgba(0, 208, 132, 0.16);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --steel: #8b95a5;
+    --steel-soft: #6b7480;
+    --contextia: #3ee0a6;
+    --contextia-tint: rgba(0, 208, 132, 0.16);
+  }
+}
+
+.landing {
+  --measure-l: 34rem;
+  --rail: 3.25rem;
+  position: relative;
+  font-family: var(--font-sans);
+}
+.landing .topo {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.landing .topbar,
+.landing main,
+.landing footer {
+  position: relative;
+  z-index: 1;
+}
+.landing .wrap {
+  width: min(64rem, 100% - 2.5rem);
+  margin-inline: auto;
+}
+.landing .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.landing .eyebrow::before {
+  content: "";
+  width: 1.6rem;
+  height: 2px;
+  background: var(--accent);
+}
+.landing h1,
+.landing h2,
+.landing h3 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  text-wrap: balance;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+
+/* top bar */
+.landing .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: saturate(1.2) blur(6px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.landing .topbar .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 0.85rem;
+}
+.landing .wordmark {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+}
+.landing .bolt-mini {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: radial-gradient(circle at 50% 50%, var(--accent) 0 1.5px, transparent 2px);
+  flex: none;
+}
+.landing .margin-note {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+@media (max-width: 620px) {
+  .landing .topbar .margin-note {
+    display: none;
+  }
+}
+
+/* hero */
+.landing .hero {
+  padding-block: clamp(3.5rem, 9vw, 7rem) clamp(2.5rem, 6vw, 4.5rem);
+}
+.landing .hero-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(2rem, 5vw, 3.5rem);
+  align-items: center;
+}
+@media (min-width: 900px) {
+  .landing .hero-grid {
+    grid-template-columns: 1.35fr 0.9fr;
+  }
+}
+.landing .hero h1 {
+  font-size: clamp(2.5rem, 6vw, 4.2rem);
+  margin: 1.1rem 0 0;
+}
+.landing .hero .lede {
+  font-family: var(--font-serif);
+  font-size: clamp(1.12rem, 2.2vw, 1.36rem);
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 33rem;
+  margin-top: 1.4rem;
+}
+.landing .hero .lede em {
+  color: var(--text);
+  font-style: italic;
+}
+.landing .cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin-top: 2rem;
+}
+.landing .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding-inline: 1.4rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.landing .btn-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.landing .btn-primary:hover {
+  transform: translateY(-1px);
+}
+.landing .btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+.landing .btn-ghost:hover {
+  border-color: var(--steel);
+}
+.landing .btn .arw {
+  font-family: var(--font-mono);
+}
+
+/* equipment plate */
+.landing .plate {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.5rem 1.6rem;
+  position: relative;
+}
+.landing .plate::before {
+  content: "ROUTE CARD";
+  position: absolute;
+  top: -0.7rem;
+  left: 1.2rem;
+  background: var(--bg);
+  padding-inline: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  color: var(--steel);
+}
+.landing .plate dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem 1rem;
+}
+.landing .plate dt {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  align-self: center;
+}
+.landing .plate dd {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.02rem;
+}
+.landing .plate .grade {
+  color: var(--accent);
+  font-weight: 600;
+}
+.landing .plate hr {
+  border: 0;
+  border-top: 1px dashed var(--border);
+  margin: 1rem 0;
+}
+.landing .plate .cavo {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--steel);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.landing .plate .cavo::before,
+.landing .plate .cavo::after {
+  content: "";
+  flex: 1;
+  height: 0;
+  border-top: 2px solid var(--steel);
+  border-radius: 2px;
+}
+
+/* the route: rail + pitches */
+.landing .route {
+  position: relative;
+  padding-block: 1rem 2rem;
+}
+.landing .route::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--rail) / 2);
+  width: 2px;
+  background: linear-gradient(var(--steel-soft), var(--steel), var(--steel-soft));
+  opacity: 0.65;
+}
+.landing .pitch {
+  position: relative;
+  padding: clamp(2.2rem, 5vw, 3.4rem) 0 clamp(2.2rem, 5vw, 3.4rem) var(--rail);
+  border-bottom: 1px solid var(--border);
+}
+.landing .pitch:last-child {
+  border-bottom: 0;
+}
+.landing .bolt {
+  position: absolute;
+  left: 0;
+  top: clamp(2.4rem, 5vw, 3.6rem);
+  width: var(--rail);
+  display: flex;
+  justify-content: center;
+}
+.landing .bolt i {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--steel);
+  box-shadow: 0 0 0 4px var(--bg);
+  display: grid;
+  place-items: center;
+  transition: border-color 0.3s ease;
+}
+.landing .bolt i::after {
+  content: "";
+  width: 0.34rem;
+  height: 0.34rem;
+  border-radius: 50%;
+  background: var(--steel);
+  transition: background-color 0.3s ease;
+}
+.landing .pitch.in .bolt i {
+  border-color: var(--accent);
+}
+.landing .pitch.in .bolt i::after {
+  background: var(--accent);
+}
+.landing .wp {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  color: var(--steel);
+  text-transform: uppercase;
+}
+.landing .pitch h2 {
+  font-size: clamp(1.7rem, 3.6vw, 2.45rem);
+  margin: 0.55rem 0 0;
+  max-width: 22ch;
+}
+.landing .pitch p {
+  max-width: var(--measure-l);
+  color: var(--text-muted);
+  margin: 0.9rem 0 0;
+}
+.landing .pitch p.reading {
+  font-family: var(--font-serif);
+  font-size: 1.12rem;
+  color: var(--text);
+}
+
+/* reveal (progressive enhancement: visible unless JS opts in) */
+.landing.js .reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.landing.js .reveal.in {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing.js .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* versus cards */
+.landing .versus {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-top: 1.6rem;
+  max-width: 44rem;
+}
+@media (min-width: 720px) {
+  .landing .versus {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.landing .card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.3rem 1.4rem;
+  background: var(--surface);
+}
+.landing .card.dim {
+  background: transparent;
+  border-style: dashed;
+}
+.landing .card h3 {
+  font-size: 1.15rem;
+  margin: 0 0 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.landing .card.dim h3 {
+  color: var(--text-muted);
+}
+.landing .card .tick {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+.landing .card.good .tick {
+  color: var(--state-solid);
+}
+.landing .card.dim .tick {
+  color: var(--state-untested);
+}
+.landing .card ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.landing .card li {
+  position: relative;
+  padding-left: 1.1rem;
+  font-size: 0.97rem;
+  color: var(--text-muted);
+}
+.landing .card li::before {
+  content: "›";
+  position: absolute;
+  left: 0;
+  color: var(--steel-soft);
+}
+.landing .card.good li {
+  color: var(--text);
+}
+.landing .honest-note {
+  margin-top: 1.4rem;
+  max-width: 44rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  border-left: 3px solid var(--state-doubt);
+  padding: 0.4rem 0 0.4rem 1rem;
+  background: color-mix(in srgb, var(--state-doubt) 6%, transparent);
+}
+.landing .honest-note b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* pipeline */
+.landing .pipe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.6rem;
+  margin-top: 1.7rem;
+  max-width: 46rem;
+}
+.landing .stage {
+  flex: 1 1 8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.85rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  position: relative;
+}
+.landing .stage .k {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: var(--steel);
+}
+.landing .stage .v {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  line-height: 1.25;
+}
+.landing .stage:not(:last-child)::after {
+  content: "→";
+  font-family: var(--font-mono);
+  color: var(--steel);
+  position: absolute;
+  right: -0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+@media (max-width: 560px) {
+  .landing .pipe {
+    flex-direction: column;
+  }
+  .landing .stage:not(:last-child)::after {
+    content: "↓";
+    right: 50%;
+    top: auto;
+    bottom: -0.7rem;
+    transform: translateX(50%);
+  }
+}
+
+/* contextia demo */
+.landing .cxt-demo {
+  margin-top: 1.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1rem 1.1rem;
+  max-width: 42rem;
+  line-height: 1.9;
+}
+.landing .cxt-demo .lbl {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 0.4rem;
+}
+.landing .redacted {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-radius: 3px;
+  padding: 0.05em 0.4em;
+}
+.landing .protected {
+  color: var(--contextia);
+  background: var(--contextia-tint);
+  border: 1px solid color-mix(in srgb, var(--contextia) 45%, transparent);
+  border-radius: 3px;
+  padding: 0.05em 0.4em;
+}
+.landing .cxt-demo .caption {
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.7rem;
+  display: block;
+}
+
+/* states */
+.landing .states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-top: 1.5rem;
+}
+.landing .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  background: var(--surface);
+  font-size: 0.92rem;
+}
+.landing .state .dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex: none;
+}
+.landing .s-solid .dot {
+  background: var(--state-solid);
+}
+.landing .s-doubt .dot {
+  background: var(--state-doubt);
+}
+.landing .s-untested .dot {
+  background: transparent;
+  border: 2px solid var(--state-untested);
+}
+.landing .danger-callout {
+  margin-top: 1.4rem;
+  max-width: 44rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 1rem 1.15rem;
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
+.landing .danger-callout b {
+  color: var(--danger);
+}
+
+/* anti-goals */
+.landing .refuse {
+  margin-top: 1.5rem;
+  max-width: 46rem;
+  display: grid;
+  gap: 0.1rem;
+}
+.landing .refuse .row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.9rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+.landing .refuse .row:last-child {
+  border-bottom: 0;
+}
+.landing .refuse .no {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.landing .refuse .txt b {
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
+.landing .refuse .txt span {
+  color: var(--text-muted);
+}
+
+/* summit / footer */
+.landing .summit {
+  padding-block: clamp(3.5rem, 8vw, 6rem);
+  text-align: center;
+  border-top: 1px solid var(--border);
+}
+.landing .summit h2 {
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+.landing .summit p {
+  color: var(--text-muted);
+  max-width: 34rem;
+  margin: 1rem auto 0;
+}
+.landing .summit .cta-row {
+  justify-content: center;
+}
+.landing footer {
+  border-top: 1px solid var(--border);
+  padding-block: 1.6rem;
+}
+.landing footer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+/* Standalone links and buttons need a thumb-sized target on a phone. Inline
+   links inside a sentence are exempt: padding them out breaks the line. */
+@media (max-width: 640px) {
+  .tap {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+  /* Whatever a page puts in the header's right slot is a standalone control,
+     so it gets the same treatment without every page asking for it. */
+  .header-slot > a,
+  .header-slot > button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+}

@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+*.db
+*.db-wal
+*.db-shm
+.env*
+e2e/.artifacts
+exports
+logs
+Dockerfile
+docker-compose.yml

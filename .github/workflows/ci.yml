@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # A dependency that is safe today can have an advisory tomorrow, so the
+    # audit runs on a clock as well as on a push.
+    - cron: "0 6 * * 1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # No version here on purpose: it comes from packageManager in
+      # package.json, so the runner, the container and a laptop all agree.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Types
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: End to end
+        run: pnpm test:e2e
+
+      - name: Dependency advisories
+        run: pnpm audit:deps
