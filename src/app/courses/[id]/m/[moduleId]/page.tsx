@@ -9,6 +9,11 @@ import { requireUser } from "@/lib/auth/session";
 import { canSeeCourse } from "@/lib/course/access";
 import { ConceptGraph } from "@/components/concept-graph";
 import { ModuleTests } from "@/components/module-tests";
+import { toClientQuestion } from "@/lib/review/grade";
+import { EditModule } from "@/components/edit-module";
+import { RegenerateModule } from "@/components/regenerate-module";
+import { ModuleRewriting } from "@/components/module-rewriting";
+import { moduleRewriteInFlight } from "@/lib/jobs/queue";
 import { MarkPosition } from "@/components/mark-position";
 import { FeynmanPanel } from "@/components/feynman-panel";
 import { VideoAnnex } from "@/components/video-annex";
@@ -47,6 +52,12 @@ export default async function ModulePage({
 
   const prev = bundle.modules[idx - 1];
   const next = bundle.modules[idx + 1];
+
+  // A rewrite (from a proposal approval or the button below) runs in the
+  // background and swaps this module in place. Surface it so the reader is not
+  // staring at the old body wondering when it changes.
+  const rewriting =
+    viewer.role === "examiner" && moduleRewriteInFlight(view.concept.id);
 
   // Prerequisite modules of THIS concept, as quick jump-back links (so a reader
   // who feels shaky can revisit what came before). Only those with a real module.
@@ -120,26 +131,40 @@ export default async function ModulePage({
           </details>
         ) : null}
 
+        <ModuleRewriting rewriting={rewriting} />
+
         <article
           className="reading-prose mt-8"
           dangerouslySetInnerHTML={{
             __html: renderMarkdown(view.module.bodyMd, {
               glossary: parseGlossaryTerms(bundle.course.glossaryMd),
               restorations: bundle.restorations,
+              sources: bundle.sources.map((s) => s.name),
             }),
           }}
         />
+
+        {!rewriting &&
+        viewer.role === "examiner" &&
+        (!bundle.course.ownerId || bundle.course.ownerId === viewer.id) ? (
+          <div className="mt-6 flex flex-col gap-3">
+            <EditModule
+              courseId={id}
+              moduleId={view.module.id}
+              bodyMd={view.module.bodyMd}
+              editedAt={view.module.editedAt}
+            />
+            <RegenerateModule courseId={id} moduleId={view.module.id} />
+          </div>
+        ) : null}
 
         {view.questions.length > 0 ? (
           <ModuleTests
             courseId={id}
             moduleTitle={view.concept.title}
-            questions={view.questions.map((q) => ({
-              id: q.id,
-              prompt: q.prompt,
-              expectedAnswer: q.expectedAnswer,
-              bloomLevel: q.bloomLevel,
-            }))}
+            questions={view.questions.map((q) =>
+              toClientQuestion(q, bundle.course.assessmentMode === "assessed"),
+            )}
           />
         ) : null}
 

@@ -1,0 +1,1 @@
+ALTER TABLE `llm_calls` ADD `price_known` integer DEFAULT true NOT NULL;

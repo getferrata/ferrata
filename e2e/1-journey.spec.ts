@@ -13,6 +13,9 @@ test("author creates a course from brief to ready", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Rig a path" }),
   ).toBeVisible();
+  // The main menu is here too: a fresh examiner lands on this page right after
+  // registering and must be able to reach Settings to add a key.
+  await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
 
   await page
     .locator("#prompt")

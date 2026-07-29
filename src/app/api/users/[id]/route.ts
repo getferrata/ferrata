@@ -4,6 +4,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
+import { mayAdminister } from "@/lib/auth/operator";
+import { courses } from "@/db/schema";
 
 export const runtime = "nodejs";
 
@@ -23,6 +25,16 @@ export async function PATCH(
     return NextResponse.json(
       { error: "you can't change your own role" },
       { status: 400 },
+    );
+  }
+  // Demoting another examiner to student takes their courses away from them
+  // (access is owner-scoped), which is the same power as a takeover wearing a
+  // different hat.
+  const patchVerdict = mayAdminister(me.id, id);
+  if (!patchVerdict.ok) {
+    return NextResponse.json(
+      { error: patchVerdict.error },
+      { status: patchVerdict.status },
     );
   }
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
@@ -49,6 +61,24 @@ export async function DELETE(
       { status: 400 },
     );
   }
-  db.delete(users).where(eq(users.id, id)).run();
+  const delVerdict = mayAdminister(me.id, id);
+  if (!delVerdict.ok) {
+    return NextResponse.json(
+      { error: delVerdict.error },
+      { status: delVerdict.status },
+    );
+  }
+  // Courses carry an owner id but no foreign key, so deleting the owner used to
+  // leave the course pointing at somebody who no longer exists: no examiner
+  // could open, rework, export or remove it ever again, while its students kept
+  // studying it. Ownership moves to whoever is doing the deleting, in the same
+  // transaction, so an author leaving the company does not strand their work.
+  db.transaction((tx) => {
+    tx.update(courses)
+      .set({ ownerId: me.id })
+      .where(eq(courses.ownerId, id))
+      .run();
+    tx.delete(users).where(eq(users.id, id)).run();
+  });
   return NextResponse.json({ ok: true });
 }

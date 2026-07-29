@@ -26,6 +26,7 @@ export function stepForStatus(status: string): number {
     case "graphing":
     case "triaging":
     case "generating":
+    case "finishing":
       return 4;
     case "ready":
       return 5;

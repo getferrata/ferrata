@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { concepts, courses, llmCalls, modules } from "@/db/schema";
 
@@ -22,6 +22,12 @@ export interface CourseSpend {
   /** Sum of per-call latency, higher than elapsed only if calls overlapped. */
   modelMs: number;
   failedCalls: number;
+  /**
+   * Calls whose model was not in the price table, so their cost is the
+   * conservative fallback rate. A figure built partly from a guess should say
+   * which part, rather than presenting a precision it does not have.
+   */
+  estimatedCalls: number;
 }
 
 export function courseSpend(courseId: string): CourseSpend | null {
@@ -36,6 +42,7 @@ export function courseSpend(courseId: string): CourseSpend | null {
       lastAt: sql<number>`max(${llmCalls.createdAt})`,
       lastLatency: sql<number>`coalesce(max(${llmCalls.latencyMs}), 0)`,
       failedCalls: sql<number>`sum(case when ${llmCalls.ok} = 0 then 1 else 0 end)`,
+      estimatedCalls: sql<number>`sum(case when ${llmCalls.priceKnown} = 0 then 1 else 0 end)`,
     })
     .from(llmCalls)
     .where(eq(llmCalls.courseId, courseId))
@@ -52,25 +59,55 @@ export function courseSpend(courseId: string): CourseSpend | null {
     elapsedMs: Math.max(0, row.lastAt - row.firstAt) + row.lastLatency,
     modelMs: row.modelMs,
     failedCalls: row.failedCalls ?? 0,
+    estimatedCalls: row.estimatedCalls ?? 0,
   };
 }
 
 /**
- * Average cost of one finished module on this install, from courses that
- * actually finished.
+ * Average cost of one finished module on this install, for a given writing
+ * model, from courses that actually finished with that model.
  *
  * Better than a constant measured once elsewhere: it reflects this install's
- * model, its depth setting and the kind of material it is given. Null until
- * there is enough history to mean anything.
+ * depth setting and the kind of material it is given. Null until there is
+ * enough history to mean anything.
+ *
+ * Scoped to the model on purpose. An average over every course ever built here
+ * is blind to which model built them, so an install with a history of expensive
+ * courses kept quoting that price after the operator switched to a cheaper
+ * model: the estimate simply did not move, and the one number the product offers
+ * before spending money was wrong in the direction that matters. With no history
+ * for the model in question the caller falls back to the price table, which at
+ * least tracks the choice.
  */
-export function measuredPerModuleUsd(minModules = 5): number | null {
+export function measuredPerModuleUsd(
+  model: string,
+  minModules = 5,
+): number | null {
+  // Courses this model wrote the modules for. A course whose modules were
+  // written by more than one model (the operator switched mid-build) is left
+  // out rather than attributed to either.
+  const byCourse = db
+    .select({ courseId: llmCalls.courseId, model: llmCalls.model })
+    .from(llmCalls)
+    .where(and(eq(llmCalls.task, "write_module"), isNotNull(llmCalls.courseId)))
+    .all();
+  const models = new Map<string, Set<string>>();
+  for (const r of byCourse) {
+    if (!r.courseId) continue;
+    const set = models.get(r.courseId) ?? new Set<string>();
+    set.add(r.model);
+    models.set(r.courseId, set);
+  }
+  const ids = [...models.entries()]
+    .filter(([, set]) => set.size === 1 && set.has(model))
+    .map(([id]) => id);
+  if (ids.length === 0) return null;
+
   const row = db
-    .select({
-      usd: sql<number>`coalesce(sum(${llmCalls.costUsd}), 0)`,
-    })
+    .select({ usd: sql<number>`coalesce(sum(${llmCalls.costUsd}), 0)` })
     .from(llmCalls)
     .innerJoin(courses, eq(courses.id, llmCalls.courseId))
-    .where(and(eq(courses.status, "ready"), isNotNull(llmCalls.courseId)))
+    .where(and(eq(courses.status, "ready"), inArray(llmCalls.courseId, ids)))
     .get();
 
   const built = db
@@ -78,7 +115,13 @@ export function measuredPerModuleUsd(minModules = 5): number | null {
     .from(modules)
     .innerJoin(concepts, eq(concepts.id, modules.conceptId))
     .innerJoin(courses, eq(courses.id, concepts.courseId))
-    .where(and(eq(courses.status, "ready"), eq(modules.status, "ready")))
+    .where(
+      and(
+        eq(courses.status, "ready"),
+        eq(modules.status, "ready"),
+        inArray(concepts.courseId, ids),
+      ),
+    )
     .get();
 
   const n = built?.n ?? 0;

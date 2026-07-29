@@ -103,15 +103,24 @@ export function consumeInvite(token: string, userId: string): string | null {
 }
 
 /**
- * Enroll an already signed-in account from an invite link. The invite is not
- * burned: whoever it was meant for has not used it yet, and burning it here
- * would strand them.
+ * Enroll an already signed-in account from an invite link, single use. The claim
+ * is a conditional update on the invite still being unused, so a forwarded link
+ * is worth nothing to the second person who opens it, and the same account
+ * cannot self-enroll into a course it was never given more than once.
  */
 export function enrollByInvite(token: string, userId: string): string | null {
   const check = readInvite(token);
   if (!check.ok || !check.invite.courseId) return null;
-  enroll(check.invite.courseId, userId);
-  return check.invite.courseId;
+  const claimed = db
+    .update(invites)
+    .set({ usedAt: now(), usedBy: userId })
+    .where(and(eq(invites.id, token), isNull(invites.usedAt)))
+    .returning({ courseId: invites.courseId })
+    .all();
+  if (claimed.length === 0) return null;
+  const courseId = claimed[0]?.courseId ?? check.invite.courseId;
+  enroll(courseId, userId);
+  return courseId;
 }
 
 function enroll(courseId: string, userId: string): void {

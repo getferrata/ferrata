@@ -1,0 +1,42 @@
+name: Feature request
+description: Something the tool should do and does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful requests describe a situation, not a feature. What you
+        were trying to do and where the tool got in the way tells us more than a
+        proposed solution, and often has a simpler answer than the one either of
+        us would have guessed.
+  - type: textarea
+    id: situation
+    attributes:
+      label: What were you trying to do
+      description: The real case, with the kind of material and the kind of learner.
+      placeholder: >
+        We onboard warehouse staff on picking procedures. The procedures are in
+        a shared drive as scanned PDFs, and ...
+    validations:
+      required: true
+  - type: textarea
+    id: obstacle
+    attributes:
+      label: Where it got in the way
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind, if anything
+      description: Optional. A description of the problem is enough.
+  - type: dropdown
+    id: workaround
+    attributes:
+      label: Is there a way around it today
+      options:
+        - "No, this blocks us"
+        - "Yes, but it is manual and does not scale"
+        - "Yes, it is fine, this would just be better"
+    validations:
+      required: true

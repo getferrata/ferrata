@@ -11,3 +11,10 @@ export const STUDENT = {
   name: "E2e Student",
   password: "student-pass-1",
 };
+
+/** A second student, for the multi-student isolation checks. */
+export const STUDENT2 = {
+  email: "student2@e2e.test",
+  name: "E2e Student Two",
+  password: "student2-pass-1",
+};

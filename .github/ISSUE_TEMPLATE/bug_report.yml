@@ -1,0 +1,63 @@
+name: Bug report
+description: Something behaves differently from what it says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste API keys, tokens, internal hostnames or anything from
+        your own material. If an example is needed to show the problem, make one
+        up. An issue is public.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what you saw instead of what you expected.
+      placeholder: |
+        I attached a folder of runbooks and pressed Rig the path.
+        The plan listed three concepts; the material covers about twenty.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      description: Numbered steps, from a fresh install where possible.
+      placeholder: |
+        1. pnpm install && pnpm dev
+        2. Register, then set a model in Settings
+        3. Create a course with ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you are on, or the commit if you built from source.
+      placeholder: "v1.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Which model was generating
+      options:
+        - A hosted model, through a provider key
+        - A local model, on this machine
+        - Not relevant, the problem is not in generation
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything in the terminal
+      description: >
+        The output of the server, if it says something. Check it for your own
+        material before pasting.
+      render: shell

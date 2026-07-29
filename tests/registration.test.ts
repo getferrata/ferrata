@@ -169,16 +169,19 @@ describe("invite lifetime", () => {
     expect(readInvite(token)).toEqual({ ok: false, reason: "revoked" });
   });
 
-  it("enrolls an existing account without burning the link", () => {
-    // The invite was meant for someone who has not signed up yet; a colleague
-    // opening it must not consume their only way in.
+  it("enrolls an existing account and burns the link, single use", () => {
+    // A forwarded course link is worth nothing to the second person who opens
+    // it: the first redemption consumes it.
     const admin = seedUser();
     const courseId = seedCourse(admin);
     const token = createInvite({ courseId, createdBy: admin });
-    const existing = seedUser("student");
+    const first = seedUser("student");
+    const second = seedUser("student");
 
-    expect(enrollByInvite(token, existing)).toBe(courseId);
-    expect(readInvite(token).ok).toBe(true);
+    expect(enrollByInvite(token, first)).toBe(courseId);
+    expect(readInvite(token).ok).toBe(false);
+    // The link is spent, so a different account cannot ride it in.
+    expect(enrollByInvite(token, second)).toBeNull();
   });
 
   it("is idempotent when the same person opens it twice", () => {

@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { courses } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getDueSession } from "@/lib/review/due";
+import { toClientQuestion } from "@/lib/review/grade";
 import { requireUser } from "@/lib/auth/session";
 import { canSeeCourse } from "@/lib/course/access";
 import { SiteHeader } from "@/components/site-header";
@@ -59,11 +60,21 @@ export default async function ReviewPage({
         ) : (
           <ReviewSession
             courseId={id}
+            assessed={course.assessmentMode === "assessed"}
             questions={due.map((d) => ({
-              questionId: d.questionId,
+              ...toClientQuestion(
+                {
+                  id: d.questionId,
+                  prompt: d.prompt,
+                  bloomLevel: d.bloomLevel,
+                  format: d.format,
+                  expectedAnswer: d.expectedAnswer,
+                  optionsJson: d.optionsJson,
+                  blanksJson: d.blanksJson,
+                },
+                course.assessmentMode === "assessed",
+              ),
               conceptTitle: d.conceptTitle,
-              prompt: d.prompt,
-              expectedAnswer: d.expectedAnswer,
               sureWrong: d.sureWrong,
             }))}
           />

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { restorations, sourceChunks, sources } from "@/db/schema";
 import { newId } from "@/lib/util/id";
+import { sealSecret } from "@/lib/crypto/secrets";
 import { chunkText } from "./chunk";
 import { extractText } from "./extract";
 import { fetchUrlText } from "./url";
@@ -104,13 +105,15 @@ export async function ingestSource(
     }
 
     // Restore map for reversible (operational) redactions, put back at render.
+    // The value is a real internal IP or hostname, so it is sealed at rest like
+    // an API key: a leaked DB copy carries the tokens, not the topology.
     for (const r of usable ? scan.restorations : []) {
       tx.insert(restorations)
         .values({
           id: newId("cxt"),
           courseId,
           token: r.token,
-          value: r.value,
+          value: sealSecret(r.value),
           label: r.label,
           type: r.type,
         })

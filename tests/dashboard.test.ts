@@ -82,6 +82,7 @@ function answer(
   correct: boolean,
   confidence: "low" | "medium" | "high" = "high",
   at = new Date(),
+  gradedBy: "self" | "system" | "model" = "self",
 ) {
   const { next } = review(null, correct, confidence, at);
   db.insert(reviews)
@@ -91,6 +92,7 @@ function answer(
       answeredAt: at.getTime(),
       correct,
       confidence,
+      gradedBy,
       fsrsStateJson: JSON.stringify(next),
     })
     .run();
@@ -239,5 +241,258 @@ describe("a wrong answer is not knowledge", () => {
     const d = getDashboard(courseId, new Date())!;
     expect(d.sureWrong).toHaveLength(1);
     expect(d.courseRetention).toBe(0);
+  });
+});
+
+describe("where the readiness figure came from", () => {
+  it("says so when every answer was graded by the student", () => {
+    const { courseId, a } = seedCourse();
+    answer(questionsOf(a)[0]!, true);
+    expect(getDashboard(courseId)!.evidence).toEqual({
+      self: 1,
+      system: 0,
+      model: 0,
+    });
+  });
+
+  it("counts the ones the system settled separately", () => {
+    const { courseId, a, b, c } = seedCourse();
+    answer(questionsOf(a)[0]!, true, "high", new Date(), "system");
+    answer(questionsOf(b)[0]!, false, "high", new Date(), "system");
+    answer(questionsOf(c)[0]!, true, "high", new Date(), "self");
+    expect(getDashboard(courseId)!.evidence).toEqual({
+      self: 1,
+      system: 2,
+      model: 0,
+    });
+  });
+
+  it("counts only the latest answer per question", () => {
+    // Somebody who self-graded, then answered the same question again as a
+    // multiple choice, is one piece of evidence and not two.
+    const { courseId, a } = seedCourse();
+    const q = questionsOf(a)[0]!;
+    answer(q, true, "high", new Date(1_000_000), "self");
+    answer(q, false, "high", new Date(2_000_000), "system");
+    expect(getDashboard(courseId)!.evidence).toEqual({
+      self: 0,
+      system: 1,
+      model: 0,
+    });
+  });
+});
+
+const { randomUUID } = await import("node:crypto");
+const { getRoster } = await import("@/lib/course/roster");
+const { users, enrollments } = await import("@/db/schema");
+
+describe("assessed mode: the figure is a measurement, not a diary", () => {
+  function seedAssessed() {
+    const courseId = newId("course");
+    db.insert(courses)
+      .values({
+        id: courseId,
+        title: "Assessed onboarding",
+        sourcePrompt: "p",
+        lang: "en",
+        status: "ready",
+        assessmentMode: "assessed",
+        createdAt: now(),
+      })
+      .run();
+    const conceptId = newId("concept");
+    db.insert(concepts)
+      .values({ id: conceptId, courseId, title: "Gateway", summary: "s", depthLevel: 1 })
+      .run();
+    const mcq = newId("q");
+    db.insert(questions)
+      .values({
+        id: mcq,
+        conceptId,
+        prompt: "which one?",
+        expectedAnswer: "b",
+        bloomLevel: "remember",
+        format: "mcq",
+        optionsJson: JSON.stringify({ options: ["a", "b"], correctIndex: 1 }),
+        misconceptionsJson: "[]",
+      })
+      .run();
+    const open = newId("q");
+    db.insert(questions)
+      .values({
+        id: open,
+        conceptId,
+        prompt: "why?",
+        expectedAnswer: "because",
+        bloomLevel: "understand",
+        format: "open",
+        misconceptionsJson: "[]",
+      })
+      .run();
+    return { courseId, conceptId, mcq, open };
+  }
+
+  it("counts only the questions the system can check", () => {
+    const { courseId } = seedAssessed();
+    const d = getDashboard(courseId)!;
+    expect(d.assessmentMode).toBe("assessed");
+    expect(d.totalQuestions).toBe(1);
+    expect(d.practiceQuestions).toBe(1);
+  });
+
+  it("ignores a self-graded answer even on a checkable question", () => {
+    // The student pressed "I had it" on the open question AND somehow recorded
+    // a self verdict on the mcq. Neither can testify in assessed mode.
+    const { courseId, mcq, open } = seedAssessed();
+    answer(mcq, true, "high", new Date(), "self");
+    answer(open, true, "high", new Date(), "self");
+    const d = getDashboard(courseId)!;
+    expect(d.testedCount).toBe(0);
+    expect(d.courseRetention).toBeNull();
+  });
+
+  it("counts a machine-checked answer", () => {
+    const { courseId, mcq } = seedAssessed();
+    answer(mcq, true, "high", new Date(), "system");
+    const d = getDashboard(courseId)!;
+    expect(d.testedCount).toBe(1);
+    expect(d.evidence).toEqual({ self: 0, system: 1, model: 0 });
+    expect(d.courseRetention).toBeGreaterThan(0.8);
+  });
+
+  it("drops a concept with nothing checkable from the denominator", () => {
+    // Otherwise "the mode cannot measure this" reads as "the student does not
+    // know this" and the figure can never reach the top.
+    const { courseId, mcq } = seedAssessed();
+    const bare = newId("concept");
+    db.insert(concepts)
+      .values({ id: bare, courseId, title: "Anecdotes", summary: "s", depthLevel: 1 })
+      .run();
+    db.insert(questions)
+      .values({
+        id: newId("q"),
+        conceptId: bare,
+        prompt: "story?",
+        expectedAnswer: "long",
+        bloomLevel: "understand",
+        format: "open",
+        misconceptionsJson: "[]",
+      })
+      .run();
+    answer(mcq, true, "high", new Date(), "system");
+    const d = getDashboard(courseId)!;
+    expect(d.courseRetention).toBeGreaterThan(0.8);
+  });
+
+  it("holds the roster to the same rule as the student's own view", () => {
+    const { courseId, mcq, open } = seedAssessed();
+    const uid = randomUUID();
+    db.insert(users)
+      .values({ id: uid, email: `${uid}@x`, name: "S", passwordHash: "x", role: "student" })
+      .run();
+    db.insert(enrollments)
+      .values({ id: newId("enr"), courseId, userId: uid, createdAt: now() })
+      .run();
+
+    // Self-grades everything, machine-checks nothing: roster shows nothing held.
+    const selfCard = review(null, true, "high").next;
+    for (const q of [mcq, open]) {
+      db.insert(reviews)
+        .values({
+          id: newId("rev"),
+          questionId: q,
+          userId: uid,
+          answeredAt: now(),
+          correct: true,
+          confidence: "high",
+          gradedBy: "self",
+          fsrsStateJson: JSON.stringify(selfCard),
+        })
+        .run();
+    }
+    const before = getRoster(courseId).find((r) => r.userId === uid)!;
+    expect(before.total).toBe(1);
+    expect(before.answered).toBe(0);
+    expect(before.retention).toBeNull();
+
+    // One machine-checked answer moves the number.
+    db.insert(reviews)
+      .values({
+        id: newId("rev"),
+        questionId: mcq,
+        userId: uid,
+        answeredAt: now() + 1,
+        correct: true,
+        confidence: "high",
+        gradedBy: "system",
+        fsrsStateJson: JSON.stringify(review(null, true, "high").next),
+      })
+      .run();
+    const after = getRoster(courseId).find((r) => r.userId === uid)!;
+    expect(after.answered).toBe(1);
+    expect(after.retention).toBeGreaterThan(0.8);
+  });
+});
+
+describe("the dashboard and the roster tell the same student the same number", () => {
+  it("agree on a concept with one of two questions answered", () => {
+    // The bug: the dashboard averaged a concept over its ANSWERED questions
+    // (so 1/2 correct read as ~100% for that concept), while the roster divided
+    // by all of them (~50%). Same evidence, two numbers.
+    const courseId = newId("course");
+    db.insert(courses)
+      .values({
+        id: courseId,
+        title: "Parity",
+        sourcePrompt: "p",
+        lang: "en",
+        status: "ready",
+        createdAt: now(),
+      })
+      .run();
+    const conceptId = newId("concept");
+    db.insert(concepts)
+      .values({ id: conceptId, courseId, title: "Gateway", summary: "s", depthLevel: 1 })
+      .run();
+    const answered = newId("q");
+    const untested = newId("q");
+    for (const id of [answered, untested]) {
+      db.insert(questions)
+        .values({
+          id,
+          conceptId,
+          prompt: "why?",
+          expectedAnswer: "because",
+          bloomLevel: "understand",
+          format: "open",
+          misconceptionsJson: "[]",
+        })
+        .run();
+    }
+    const uid = randomUUID();
+    db.insert(users)
+      .values({ id: uid, email: `${uid}@x`, name: "S", passwordHash: "x", role: "student" })
+      .run();
+    db.insert(enrollments)
+      .values({ id: newId("enr"), courseId, userId: uid, createdAt: now() })
+      .run();
+    db.insert(reviews)
+      .values({
+        id: newId("rev"),
+        questionId: answered,
+        userId: uid,
+        answeredAt: now(),
+        correct: true,
+        confidence: "high",
+        gradedBy: "self",
+        fsrsStateJson: JSON.stringify(review(null, true, "high").next),
+      })
+      .run();
+
+    const dash = getDashboard(courseId, new Date(), uid)!;
+    const roster = getRoster(courseId).find((r) => r.userId === uid)!;
+    // One of two known, so about a half, not a whole. And identical either way.
+    expect(dash.courseRetention).toBeLessThan(0.7);
+    expect(dash.courseRetention).toBeCloseTo(roster.retention!, 5);
   });
 });

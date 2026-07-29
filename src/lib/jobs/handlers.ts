@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   concepts as conceptsT,
@@ -23,22 +23,33 @@ import {
   type InterviewState,
 } from "@/lib/llm/tasks/interview_questions";
 import { runBuildGraph } from "@/lib/llm/tasks/build_graph";
-import { runWriteModule } from "@/lib/llm/tasks/write_module";
+import {
+  runWriteModule,
+  verifyModule,
+  type RepairRequest,
+} from "@/lib/llm/tasks/write_module";
 import { runConcretenessPass } from "@/lib/llm/tasks/concreteness_pass";
+import { looksTruncated } from "@/lib/llm/truncation";
 import { runWriteQuestions } from "@/lib/llm/tasks/write_questions";
 import { runSchedule } from "@/lib/llm/tasks/schedule";
 import { runGlossary } from "@/lib/llm/tasks/glossary";
+import { countBlanks } from "@/lib/review/grade";
 import { breakCycles, topoSort, type DagEdge } from "@/lib/graph/dag";
 import { scrubTemplateArtifacts } from "@/lib/course/scrub";
 import { triage } from "@/lib/graph/triage";
 import { evalModule } from "@/lib/evals";
 import {
+  buildIndex,
   formatGrounding,
   loadCourseChunks,
-  retrieve,
+  retrieveWith,
   sourceOverview,
-  type ChunkDoc,
+  sourceTexts,
+  type Bm25Index,
 } from "@/lib/sources/query";
+import { runProposeUpdates } from "@/lib/llm/tasks/propose_updates";
+import { preflightTag, runPreflight } from "@/lib/llm/preflight";
+import { recordProposals } from "@/lib/course/proposals";
 
 export type JobHandler = (payload: unknown) => Promise<unknown>;
 
@@ -65,7 +76,13 @@ const interviewHandler: JobHandler = async (payload) => {
   const course = db.select().from(coursesT).where(eq(coursesT.id, id)).get();
   if (!course) throw new Error("interview: course not found");
 
-  const result = await runInterviewQuestions(course.sourcePrompt, id);
+  // The interview sees what was attached, so it does not spend a question
+  // asking the author to describe material the pipeline already has.
+  const result = await runInterviewQuestions(
+    course.sourcePrompt,
+    sourceOverview(loadCourseChunks(id)),
+    id,
+  );
   const state: InterviewState = { questions: result.questions, answers: {} };
   db.update(coursesT)
     .set({ interviewJson: JSON.stringify(state), status: "interview" })
@@ -82,13 +99,12 @@ const intakeHandler: JobHandler = async (payload) => {
   if (!course) throw new Error("intake: course not found");
 
   // Ground intake in the attached material so concepts reflect it, not a guess.
+  // The brief is the author's own words (trusted); the attached overview is
+  // imported and untrusted, so intake keeps them in separate channels.
   const overview = sourceOverview(loadCourseChunks(id));
-  const material = overview
-    ? `${course.sourcePrompt}\n\n## Materiale allegato (estratti)\n${overview}`
-    : course.sourcePrompt;
-
   const result = await runIntake(
-    material,
+    course.sourcePrompt,
+    overview,
     course.authorContextMd ?? "",
     id,
     intakeDepthGuidance(course.depthPreset),
@@ -285,7 +301,9 @@ export function finishedConcepts(conceptIds: string[]): Set<string> {
     db
       .select({ conceptId: questionsT.conceptId })
       .from(questionsT)
-      .where(inArray(questionsT.conceptId, ready))
+      .where(
+        and(inArray(questionsT.conceptId, ready), isNull(questionsT.retiredAt)),
+      )
       .all()
       .map((q) => q.conceptId),
   );
@@ -300,11 +318,13 @@ const generateCourseHandler: JobHandler = async (payload) => {
   const concepts = db
     .select()
     .from(conceptsT)
-    .where(eq(conceptsT.courseId, id))
+    .where(and(eq(conceptsT.courseId, id), isNull(conceptsT.retiredAt)))
     .orderBy(asc(conceptsT.topoOrder))
     .all();
   const edges = db.select().from(edgesT).where(eq(edgesT.courseId, id)).all();
-  const chunks = loadCourseChunks(id); // grounding corpus (empty if no sources)
+  // Grounding corpus (empty if no sources). Tokenised once here, not once per
+  // module: a 15-module course reused the same corpus 15 times.
+  const index = buildIndex(loadCourseChunks(id));
   const anchors = anchorTerms(
     course.sourcePrompt,
     concepts.map((c) => c.title),
@@ -324,12 +344,44 @@ const generateCourseHandler: JobHandler = async (payload) => {
   // questions defeats the whole verification model, so one that was written
   // just before the process died gets written again rather than kept.
   const done = finishedConcepts(concepts.map((c) => c.id));
+  // Bodies that are written and accepted but whose tests did not arrive. They
+  // need one call, not four.
+  const untested = untestedConcepts(
+    concepts.filter((c) => !done.has(c.id)).map((c) => c.id),
+  );
 
   let generated = 0;
   for (const concept of concepts) {
     if (done.has(concept.id)) {
       generated++;
       continue;
+    }
+    const stored = untested.get(concept.id);
+    if (stored) {
+      try {
+        const rows = await writeQuestionRows(
+          id,
+          course,
+          concept,
+          stored.bodyMd,
+        );
+        if (rows.length > 0) {
+          db.transaction((tx) => {
+            for (const row of rows) tx.insert(questionsT).values(row).run();
+          });
+          generated++;
+          continue;
+        }
+        // Still no tests. Fall through and rewrite the module: a body the test
+        // writer cannot make a single question out of is itself the suspect.
+        log.warn(
+          `no tests for the stored body of "${concept.title}"; rewriting the module`,
+        );
+      } catch (err) {
+        log.error(
+          `tests-only pass for "${concept.title}" failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     try {
       const moduleId = await generateOneModule(
@@ -338,7 +390,7 @@ const generateCourseHandler: JobHandler = async (payload) => {
         concept,
         prereqTitles(concept),
         anchors,
-        chunks,
+        index,
       );
       if (moduleId) generated++;
     } catch (err) {
@@ -351,7 +403,13 @@ const generateCourseHandler: JobHandler = async (payload) => {
 
   if (generated === 0) throw new Error("generate_course: no modules generated");
 
-  // Course-level artifacts.
+  // Course-level artifacts. Announced as its own stage: these are two more
+  // model calls, and until this existed the screen showed a finished progress
+  // bar and a module counter that had stopped being true.
+  db.update(coursesT)
+    .set({ status: "finishing" })
+    .where(eq(coursesT.id, id))
+    .run();
   const [scheduleRes, glossaryRes] = await Promise.all([
     course.budgetMinutes != null
       ? runSchedule(
@@ -364,6 +422,10 @@ const generateCourseHandler: JobHandler = async (payload) => {
               priority: c.priority,
               estimatedMinutes: c.estimatedMinutes,
               depthLevel: c.depthLevel,
+              // The same edges the student sees as the prerequisite map. The
+              // scheduler is invited to reorder, and without these it reorders
+              // through the prerequisites.
+              prerequisites: prereqTitles(c),
             })),
           },
           id,
@@ -374,6 +436,8 @@ const generateCourseHandler: JobHandler = async (payload) => {
         lang: course.lang,
         objective: course.objective ?? "",
         modules: concepts.map((c) => ({ title: c.title, summary: c.summary })),
+        // Titles say which terms matter; the material says what they mean here.
+        sources: sourceOverview(loadCourseChunks(id)),
       },
       id,
     ).catch(() => null),
@@ -391,6 +455,193 @@ const generateCourseHandler: JobHandler = async (payload) => {
   return { modules: generated };
 };
 
+// --- regenerate one module ---------------------------------------------------
+
+/**
+ * Rewrite a single module through the full quality loop, without rebuilding the
+ * course around it. Used when the author judges one module bad, and to write
+ * the module for a concept added after the build.
+ *
+ * The course stays "ready" throughout: the other twelve modules are still a
+ * course, and students keep studying them while this one is rewritten.
+ */
+const regenerateModuleHandler: JobHandler = async (payload) => {
+  const id = courseId(payload);
+  const conceptId = (payload as { conceptId?: unknown }).conceptId;
+  if (typeof conceptId !== "string" || !conceptId) {
+    throw new Error("regenerate_module: payload missing conceptId");
+  }
+
+  const course = db.select().from(coursesT).where(eq(coursesT.id, id)).get();
+  if (!course) throw new Error("regenerate_module: course not found");
+  const concept = db
+    .select()
+    .from(conceptsT)
+    .where(and(eq(conceptsT.id, conceptId), eq(conceptsT.courseId, id)))
+    .get();
+  // Deleted between enqueue and run (e.g. a retire proposal approved in the
+  // meantime): nothing to write, and failing would only retry into the same.
+  if (!concept) return { skipped: "concept no longer exists" };
+
+  const concepts = db
+    .select()
+    .from(conceptsT)
+    .where(and(eq(conceptsT.courseId, id), isNull(conceptsT.retiredAt)))
+    .orderBy(asc(conceptsT.topoOrder))
+    .all();
+  const edges = db.select().from(edgesT).where(eq(edgesT.courseId, id)).all();
+  const index = buildIndex(loadCourseChunks(id));
+  const anchors = anchorTerms(
+    course.sourcePrompt,
+    concepts.map((c) => c.title),
+  );
+  const prereqs = edges
+    .filter((e) => e.toConceptId === concept.id)
+    .map((e) => concepts.find((c) => c.id === e.fromConceptId)?.title)
+    .filter((t): t is string => Boolean(t));
+
+  const moduleId = await generateOneModule(
+    id,
+    course,
+    concept,
+    prereqs,
+    anchors,
+    index,
+  );
+  if (!moduleId) throw new Error("regenerate_module: nothing was written");
+  return { moduleId };
+};
+
+type QuestionRow = typeof questionsT.$inferInsert;
+
+/**
+ * The tests for one module body, ready to insert.
+ *
+ * A module with zero questions defeats the whole verification model, so a
+ * failed generation gets one cheaper retry (count 1, less JSON for a small
+ * local model to get wrong) before giving up. Kept separate from writing the
+ * body because the two fail independently: a body can be good and its tests
+ * still not arrive, and that case must not cost a rewrite of the body.
+ */
+export async function writeQuestionRows(
+  courseId: string,
+  course: { lang: string; sourcePrompt: string },
+  concept: Concept,
+  bodyMd: string,
+): Promise<QuestionRow[]> {
+  const want = questionCount(concept.depthLevel);
+  const args = {
+    lang: course.lang,
+    conceptTitle: concept.title,
+    bodyMd,
+    depthLevel: concept.depthLevel,
+    sourcePrompt: course.sourcePrompt,
+  };
+  let qs = await runWriteQuestions({ ...args, count: want }, courseId).catch(
+    () => null,
+  );
+  if (!qs || qs.questions.length === 0) {
+    // Half, not one. The retry exists because a long list is more for a model
+    // to get wrong, so asking for less is right; asking for a single question
+    // is not. On the first hosted-model run every depth-3 module took this
+    // path, and a module carrying the hardest material in the course came out
+    // with one test, which cannot measure whether anyone learned it. Halving
+    // keeps the retry cheap and keeps the module worth sitting.
+    const fewer = Math.max(2, Math.ceil(want / 2));
+    log.warn(
+      `write_questions for "${concept.title}" produced nothing, retrying with count ${fewer}`,
+    );
+    qs = await runWriteQuestions({ ...args, count: fewer }, courseId).catch(
+      () => null,
+    );
+  }
+  if (!qs) {
+    log.error(
+      `write_questions for "${concept.title}" failed twice, module ships untested`,
+    );
+    return [];
+  }
+  if (qs.questions.length < want) {
+    log.warn(
+      `write_questions for "${concept.title}" returned ${qs.questions.length}/${want}`,
+    );
+  }
+  return qs.questions.map((q) => {
+    // Blanks are stored only when they match the blanks the prompt actually
+    // shows. A mismatch would mark a right answer wrong, which is worse than
+    // leaving the question to the student.
+    const blanks =
+      q.format === "cloze" &&
+      q.blanks?.length &&
+      q.blanks.length === countBlanks(q.prompt)
+        ? JSON.stringify(q.blanks)
+        : null;
+    return {
+      id: newId("q"),
+      conceptId: concept.id,
+      prompt: q.prompt,
+      expectedAnswer: q.expectedAnswer,
+      bloomLevel: q.bloomLevel,
+      format: q.format,
+      optionsJson: q.options ? JSON.stringify(q.options) : null,
+      blanksJson: blanks,
+      misconceptionsJson: JSON.stringify(q.misconceptions),
+    };
+  });
+}
+
+/**
+ * Concepts whose module body is written and ready but carries no live test,
+ * mapped to that body.
+ *
+ * These are the expensive ones to get wrong. `finishedConcepts` rightly refuses
+ * to call such a module done, but the resume path then rewrote it from scratch:
+ * four calls to replace a body that was already accepted, every time the worker
+ * came back, because the one call that failed was the last one. Handing back the
+ * stored body lets the resume pay only for the tests.
+ */
+export function untestedConcepts(
+  conceptIds: string[],
+): Map<string, { moduleId: string; bodyMd: string }> {
+  const out = new Map<string, { moduleId: string; bodyMd: string }>();
+  if (conceptIds.length === 0) return out;
+  const ready = db
+    .select({
+      id: modulesT.id,
+      conceptId: modulesT.conceptId,
+      bodyMd: modulesT.bodyMd,
+    })
+    .from(modulesT)
+    .where(
+      and(eq(modulesT.status, "ready"), inArray(modulesT.conceptId, conceptIds)),
+    )
+    .all()
+    .filter((m): m is typeof m & { bodyMd: string } => Boolean(m.bodyMd));
+  if (ready.length === 0) return out;
+  const tested = new Set(
+    db
+      .select({ conceptId: questionsT.conceptId })
+      .from(questionsT)
+      .where(
+        and(
+          inArray(
+            questionsT.conceptId,
+            ready.map((m) => m.conceptId),
+          ),
+          isNull(questionsT.retiredAt),
+        ),
+      )
+      .all()
+      .map((q) => q.conceptId),
+  );
+  for (const m of ready) {
+    if (!tested.has(m.conceptId)) {
+      out.set(m.conceptId, { moduleId: m.id, bodyMd: m.bodyMd });
+    }
+  }
+  return out;
+}
+
 const MAX_MODULE_ATTEMPTS = 2;
 
 // Lite mode (FERRATA_LITE=1): one LLM call per module instead of ~4, skipping the
@@ -405,13 +656,22 @@ async function generateOneModule(
   concept: Concept,
   prereqs: string[],
   anchors: string[],
-  chunks: ChunkDoc[],
+  index: Bm25Index,
 ): Promise<string | null> {
-  let best: { bodyMd: string; score: number; report: unknown } | null = null;
+  let best: {
+    bodyMd: string;
+    score: number;
+    report: unknown;
+    hard: number;
+  } | null = null;
 
   // Retrieve the material most relevant to this concept, to ground on + cite.
-  const grounded = retrieve(`${concept.title} ${concept.summary}`, chunks, 5);
+  const grounded = retrieveWith(index, `${concept.title} ${concept.summary}`, 5);
   const sources = formatGrounding(grounded);
+
+  // Carries the previous attempt's body plus the exact defects to fix, so a
+  // second attempt is a targeted repair rather than a blind reroll.
+  let repair: RepairRequest | undefined;
 
   const attempts = LITE ? 1 : MAX_MODULE_ATTEMPTS;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -431,11 +691,12 @@ async function generateOneModule(
         sources,
       },
       id,
+      repair,
     );
 
     // Lite: accept the single draft as-is (prompt carries the quality rules).
     if (LITE) {
-      best = { bodyMd: drafted.bodyMd, score: 1, report: { lite: true } };
+      best = { bodyMd: drafted.bodyMd, score: 1, report: { lite: true }, hard: 0 };
       break;
     }
 
@@ -447,11 +708,36 @@ async function generateOneModule(
         conceptTitle: concept.title,
         sourcePrompt: course.sourcePrompt,
         bodyMd: drafted.bodyMd,
+        // The same excerpts the draft was written from, so the pass has facts to
+        // be concrete with instead of having to invent them.
+        sources,
       },
       id,
-    ).catch(() => ({ bodyMd: drafted.bodyMd, notes: [] }));
+    ).catch((err: unknown) => {
+      // Falling back to the draft is right: a module without the pass is worse
+      // than one with it, and much better than no module. Doing it silently is
+      // not. Three of the fourteen modules in the first hosted-model course
+      // shipped without ever being made concrete, and nothing anywhere said so:
+      // the pass is described as mandatory, and this is the branch where it
+      // stops being.
+      log.warn(
+        `concreteness pass for "${concept.title}" failed, shipping the draft as written: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { bodyMd: drafted.bodyMd, notes: [] };
+    });
 
     concrete.bodyMd = scrubTemplateArtifacts(concrete.bodyMd);
+
+    // The concreteness pass re-emits the whole body; if that rewrite was cut off
+    // at the token cap, keep the complete draft rather than a body that stops
+    // mid-sentence. The draft already carries the house anatomy; concreteness is
+    // an enhancement, and a truncated enhancement is worse than none.
+    if (looksTruncated(concrete.bodyMd) && !looksTruncated(drafted.bodyMd)) {
+      log.warn(
+        `concreteness pass for "${concept.title}" came back truncated; keeping the full draft`,
+      );
+      concrete.bodyMd = drafted.bodyMd;
+    }
 
     const report = await evalModule(
       concrete.bodyMd,
@@ -466,87 +752,208 @@ async function generateOneModule(
       id,
     );
 
-    if (!best || report.score > best.score) {
-      best = { bodyMd: concrete.bodyMd, score: report.score, report };
+    // Deterministic checks the judge is bad at: a citation either names a real
+    // source or it does not. Hard violations block acceptance even when the judge
+    // was happy, which is the point, since a confident invention is exactly what
+    // the judge waves through.
+    const v = verifyModule({
+      bodyMd: concrete.bodyMd,
+      sources: grounded,
+      depthLevel: concept.depthLevel,
+    });
+
+    // Prefer a clean body over a higher-scoring one that fails a hard check: a
+    // module with an invented citation is worse than a slightly duller honest one.
+    const candidate = {
+      bodyMd: concrete.bodyMd,
+      score: report.score,
+      report,
+      hard: v.hard.length,
+    };
+    if (
+      !best ||
+      candidate.hard < best.hard ||
+      (candidate.hard === best.hard && candidate.score > best.score)
+    ) {
+      best = candidate;
     }
-    if (report.pass) break; // good enough; stop regenerating
+
+    // Accept only when the judge passed AND nothing deterministic is broken.
+    if (report.pass && v.hard.length === 0) break;
+
+    // Otherwise, if a retry remains, turn this attempt's specific defects into a
+    // targeted repair instead of a blind reroll.
+    if (attempt < attempts) {
+      const notes = [
+        ...v.hard,
+        ...v.soft,
+        ...(report.judge?.specificityViolations ?? []).map(
+          (s) => `Rewrite this generic passage to be specific: ${s}`,
+        ),
+        ...(report.judge?.groundingViolations ?? []).map(
+          (s) => `Remove or ground this unsupported claim: ${s}`,
+        ),
+        ...(report.rubrics.pass
+          ? []
+          : report.rubrics.checks
+              .filter((c) => !c.pass)
+              .map((c) => `Improve: ${c.detail}`)),
+      ].slice(0, 12);
+      repair = notes.length
+        ? { priorBody: concrete.bodyMd, notes }
+        : undefined;
+    }
   }
 
   if (!best) return null;
 
-  const moduleId = newId("module");
-  // A concept has exactly one module and one set of tests. Clearing first means
-  // a half-written attempt from an interrupted run is replaced rather than
-  // duplicated beside it. Safe here because generation always precedes study:
-  // nobody has answered these questions yet.
-  db.delete(modulesT).where(eq(modulesT.conceptId, concept.id)).run();
-  db.delete(questionsT).where(eq(questionsT.conceptId, concept.id)).run();
-  db.insert(modulesT)
-    .values({
-      id: moduleId,
-      conceptId: concept.id,
-      kind: "concept",
-      bodyMd: best.bodyMd,
-      status: "ready",
-      evalScore: best.score,
-      evalReportJson: JSON.stringify(best.report),
-      generatedAt: now(),
-    })
-    .run();
+  if (best.hard > 0) {
+    log.warn(
+      `module "${concept.title}" ships with ${best.hard} unresolved check(s) after ${attempts} attempt(s); best available kept`,
+    );
+  }
 
-  // Inline tests for this module. A module with zero questions defeats the
-  // whole verification model, so a failed generation gets one cheaper retry
-  // (count 1, less JSON for small local models to get wrong) before giving up.
-  const wantQuestions = questionCount(concept.depthLevel);
-  const questionArgs = {
-    lang: course.lang,
-    conceptTitle: concept.title,
-    bodyMd: best.bodyMd,
-    depthLevel: concept.depthLevel,
-    sourcePrompt: course.sourcePrompt,
-  };
-  let qs = await runWriteQuestions(
-    { ...questionArgs, count: wantQuestions },
+  // Last line of defence: every attempt truncated (the draft and the pass both
+  // stopped mid-sentence). Nothing to fall back to, but do not stay silent about
+  // shipping a partial module.
+  if (looksTruncated(best.bodyMd)) {
+    log.error(
+      `module "${concept.title}" ships with a body that appears truncated; check the token cap`,
+    );
+  }
+
+  // Write the tests BEFORE touching the DB. On a regeneration the old module is
+  // live and students may be answering it, so the delete and the inserts have
+  // to be one atomic swap with no gap; generating the questions first, then
+  // swapping, means there is never a moment where a ready module has no tests.
+  const questionRows = await writeQuestionRows(
     id,
-  ).catch(() => null);
-  if (!qs || qs.questions.length === 0) {
-    log.warn(
-      `write_questions for "${concept.title}" produced nothing, retrying with count 1`,
-    );
-    qs = await runWriteQuestions({ ...questionArgs, count: 1 }, id).catch(
-      () => null,
-    );
-  }
-  if (!qs) {
-    log.error(`write_questions for "${concept.title}" failed twice, module ships untested`);
-    qs = { questions: [] };
-  } else if (qs.questions.length < wantQuestions) {
-    log.warn(
-      `write_questions for "${concept.title}" returned ${qs.questions.length}/${wantQuestions}`,
-    );
-  }
+    course,
+    concept,
+    best.bodyMd,
+  );
 
-  for (const q of qs.questions) {
-    db.insert(questionsT)
+  // Reuse the existing module's id on a regeneration. A new id would 404 the
+  // module URL the author is sitting on and orphan any resume bookmark; the
+  // course has one module per concept, so keeping the id is both correct and
+  // kinder. A first build has no row yet, so it mints one.
+  const existing = db
+    .select({ id: modulesT.id })
+    .from(modulesT)
+    .where(eq(modulesT.conceptId, concept.id))
+    .get();
+  const moduleId = existing?.id ?? newId("module");
+  // The swap, atomic: replacing the old module and its tests and writing the
+  // new ones is one transaction. A regeneration replaces a live module; without
+  // this a reader between the two would see a module with no tests, and a
+  // student answering an old question would hit a gone row.
+  //
+  // The old questions are RETIRED, not deleted. `reviews.questionId` cascades,
+  // so deleting them would take every student's answers, their FSRS state and
+  // the sure-and-wrong record with them: silent, retroactive, unrecoverable.
+  // An author rewording one paragraph must not erase three weeks of somebody
+  // else's study. Retired questions are filtered out of everything that lists
+  // what to study; the ledger keeps them.
+  db.transaction((tx) => {
+    tx.delete(modulesT).where(eq(modulesT.conceptId, concept.id)).run();
+    tx.update(questionsT)
+      .set({ retiredAt: now() })
+      .where(
+        and(eq(questionsT.conceptId, concept.id), isNull(questionsT.retiredAt)),
+      )
+      .run();
+    tx.insert(modulesT)
       .values({
-        id: newId("q"),
+        id: moduleId,
         conceptId: concept.id,
-        prompt: q.prompt,
-        expectedAnswer: q.expectedAnswer,
-        bloomLevel: q.bloomLevel,
-        format: q.format,
-        optionsJson: q.options ? JSON.stringify(q.options) : null,
-        misconceptionsJson: JSON.stringify(q.misconceptions),
+        kind: "concept",
+        bodyMd: best.bodyMd,
+        status: "ready",
+        evalScore: best.score,
+        evalReportJson: JSON.stringify(best.report),
+        generatedAt: now(),
       })
       .run();
-  }
+    for (const row of questionRows) tx.insert(questionsT).values(row).run();
+  });
 
   return moduleId;
 }
 
+// --- propose updates from new material ---------------------------------------
+
+/**
+ * Read material added to a finished course and store what it would change as
+ * pending proposals. Storing is all this does: applying is the author's click,
+ * per proposal, on the course page.
+ */
+const proposeUpdatesHandler: JobHandler = async (payload) => {
+  const id = courseId(payload);
+  const raw = (payload as { sourceIds?: unknown }).sourceIds;
+  const sourceIds = Array.isArray(raw)
+    ? raw.filter((x): x is string => typeof x === "string")
+    : [];
+  if (sourceIds.length === 0) {
+    throw new Error("propose_updates: payload missing sourceIds");
+  }
+
+  const course = db.select().from(coursesT).where(eq(coursesT.id, id)).get();
+  if (!course) throw new Error("propose_updates: course not found");
+
+  const material = sourceTexts(sourceIds);
+  if (!material) {
+    // The route checks before queuing, so reaching this means the sources were
+    // deleted in between. Nothing to read, nothing to propose.
+    return { proposals: 0, skipped: "no readable text" };
+  }
+
+  const concepts = db
+    .select()
+    .from(conceptsT)
+    .where(and(eq(conceptsT.courseId, id), isNull(conceptsT.retiredAt)))
+    .orderBy(asc(conceptsT.topoOrder))
+    .all();
+  const conceptList = concepts
+    .map((c, i) => `${i}. ${c.title}: ${c.summary}`)
+    .join("\n");
+
+  const result = await runProposeUpdates(
+    {
+      lang: course.lang,
+      objective: course.objective ?? course.sourcePrompt,
+      conceptList,
+      material,
+    },
+    id,
+  );
+
+  const stored = recordProposals(
+    id,
+    result.proposals,
+    concepts.map((c) => ({ id: c.id, title: c.title })),
+  );
+  return { proposals: stored };
+};
+
+// --- preflight: does the selected model hold up against these prompts --------
+
+/**
+ * One pass through the pipeline on a fixture. A job rather than a request
+ * because it is a minute of model calls, and the report goes in the job result
+ * so the page that asked can poll for it like any other piece of work.
+ */
+const preflightHandler: JobHandler = async (payload) => {
+  const runId = (payload as { runId?: unknown }).runId;
+  if (typeof runId !== "string") throw new Error("preflight: payload missing runId");
+  return runPreflight(preflightTag(runId));
+};
+
 export const HANDLERS: Record<string, JobHandler> = {
+  preflight: preflightHandler,
   interview_questions: interviewHandler,
   intake: intakeHandler,
   build_graph: buildGraphHandler,
   generate_course: generateCourseHandler,
+  regenerate_module: regenerateModuleHandler,
+  propose_updates: proposeUpdatesHandler,
 };

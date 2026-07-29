@@ -124,7 +124,7 @@ describe("renderMarkdown", () => {
       ],
     });
     expect(html).not.toContain("cxt:deadbeef00");
-    expect(html).toContain("valore protetto");
+    expect(html).toContain("value protected by Contextia");
   });
 });
 
@@ -135,5 +135,52 @@ describe("a course that arrived from someone else", () => {
     const html = renderMarkdown("Il db è ⟨cxt:ab12cd34ef⟩ in produzione.");
     expect(html).not.toContain("cxt:ab12cd34ef");
     expect(html).toContain("•••");
+  });
+});
+
+describe("citations point at documents that exist", () => {
+  const sources = ["runbook-rilascio-base.md", "architettura.md"];
+
+  it("repairs a name the model mangled while copying it", () => {
+    // The real course cited "runbookrilebasico.md" for a file whose name was
+    // longer. The pill named a document nobody could open.
+    const html = renderMarkdown(
+      "Il rollback si fa così [fonte: runbook-rilascio_base].",
+      { sources },
+    );
+    expect(html).toContain("runbook-rilascio-base.md");
+    expect(html).not.toContain("cite-unknown");
+  });
+
+  it("leaves an exact citation exactly as written", () => {
+    const html = renderMarkdown("Vedi [fonte: architettura.md] per il resto.", {
+      sources,
+    });
+    expect(html).toContain("architettura.md");
+    expect(html).not.toContain("cite-unknown");
+  });
+
+  it("marks a citation naming a document the course does not have", () => {
+    const html = renderMarkdown("Come da [fonte: policy-sicurezza.md].", {
+      sources,
+    });
+    expect(html).toContain("cite-unknown");
+    expect(html).toContain("policy-sicurezza.md");
+  });
+
+  it("refuses to guess when two sources are equally close", () => {
+    const html = renderMarkdown("Vedi [fonte: runbook].", {
+      sources: ["runbook-a.md", "runbook-b.md"],
+    });
+    // Repointing at the wrong document would be worse than admitting the doubt.
+    expect(html).toContain("cite-unknown");
+  });
+
+  it("renders citations unchanged when the sources are unknown", () => {
+    // An imported package carries no source list; the citation is still the
+    // author's and must read normally.
+    const html = renderMarkdown("Vedi [fonte: qualcosa.md].");
+    expect(html).toContain("qualcosa.md");
+    expect(html).not.toContain("cite-unknown");
   });
 });

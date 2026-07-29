@@ -73,19 +73,83 @@ export function clearFailures(key: string): void {
   buckets.delete(key);
 }
 
+// --- rate limiting (every call counts, not just failures) -------------------
+
+interface RateBucket {
+  count: number;
+  /** When the current window began. */
+  since: number;
+}
+
+const rateBuckets = new Map<string, RateBucket>();
+
 /**
- * Best-effort client address. Behind a reverse proxy the socket address is the
- * proxy, so the forwarded header is used when present. It is spoofable by
- * anyone talking to the app directly, which is why the email is throttled too:
- * an attacker can rotate one of the two keys, not both.
+ * A rolling per-key call cap, for the paid endpoints a signed-in user can hit
+ * directly (explain-back grading). Every call counts. Because this runs
+ * synchronously before the LLM `await`, a burst of concurrent requests each
+ * increments the counter before any of them start spending, so it also closes
+ * the check-then-spend window against the per-user credit ceiling.
  */
-export function clientKey(req: Request): string {
+export function hitRateLimit(
+  key: string,
+  limit: number,
+  windowMs: number,
+  at: number = Date.now(),
+): ThrottleVerdict {
+  let b = rateBuckets.get(key);
+  if (!b || at - b.since >= windowMs) {
+    b = { count: 0, since: at };
+    if (rateBuckets.size >= MAX_KEYS) {
+      for (const [k, v] of rateBuckets) {
+        if (at - v.since >= windowMs) rateBuckets.delete(k);
+      }
+      if (rateBuckets.size >= MAX_KEYS) rateBuckets.clear();
+    }
+    rateBuckets.set(key, b);
+  }
+  b.count += 1;
+  if (b.count > limit) {
+    return {
+      allowed: false,
+      retryAfterSec: Math.max(1, Math.ceil((b.since + windowMs - at) / 1000)),
+    };
+  }
+  return { allowed: true, retryAfterSec: 0 };
+}
+
+/**
+ * Best-effort client address, for throttling.
+ *
+ * `X-Forwarded-For` is written by the client unless something in front is
+ * rewriting it, so trusting it unconditionally handed every caller a fresh
+ * throttle key per request: a brute force just varied the header and never hit
+ * the limit. It is only believed when the operator says there is a proxy, and
+ * then the RIGHTMOST hop is taken, because that is the one their own proxy
+ * appended. The leftmost is whatever the client claimed, even behind an honest
+ * proxy.
+ *
+ * Unset by default, which is the safe reading for `pnpm start` on a VM with the
+ * port open, a setup DEPLOY.md documents.
+ *
+ * Returns null rather than a constant when there is nothing trustworthy to key
+ * on. Bucketing every caller under one name would turn the throttle itself into
+ * the attack: eight failures from anywhere would refuse everybody. Callers fall
+ * back to a key the attacker cannot rotate instead, which for a login is the
+ * email being guessed.
+ */
+export function clientKey(req: Request): string | null {
+  if (process.env.FERRATA_TRUST_PROXY !== "1") return null;
   const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]?.trim() || "unknown";
-  return req.headers.get("x-real-ip") ?? "unknown";
+  if (fwd) {
+    const hops = fwd.split(",");
+    const last = hops[hops.length - 1]?.trim();
+    if (last) return last;
+  }
+  return req.headers.get("x-real-ip")?.trim() || null;
 }
 
 /** Test seam: drop all counters. */
 export function resetThrottle(): void {
   buckets.clear();
+  rateBuckets.clear();
 }

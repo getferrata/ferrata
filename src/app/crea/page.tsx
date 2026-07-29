@@ -5,9 +5,16 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FerrataMark } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppNav } from "@/components/app-nav";
+import { UserMenu } from "@/components/user-menu";
 import { AuthoringSteps } from "@/components/authoring-steps";
 
-const EXAMPLE = `I'm a systems engineer with firewall and Linux experience. I have an interview Thursday at 10:30 for a Network & Security Engineer role in a data center. They want BGP full table, OSPF, AS and RIPE management, NSX, SD-WAN and Azure networking. I have eight hours. I've never run BGP.`;
+// Deliberately not from any one trade. The examples exist to show the SHAPE of a
+// good brief (who is learning, what they already know, by when, what counts as
+// ready) and a course written for a law firm or a workshop needs that shape as
+// much as a software team does. Naming an industry in the default text tells
+// everyone else this tool is not for them.
+const EXAMPLE = `Someone joins my team on Monday and takes over a job I have done for six years. They know the trade but not how we do it here: our procedures, our exceptions, the things that go wrong and who to call. They have two weeks before they handle it alone. I have written notes and the procedures, attached below.`;
 
 type Depth = "overview" | "operational" | "scratch";
 
@@ -18,27 +25,33 @@ interface SetupInfo {
   cost: { baseUsd: number; perModuleUsd: number; measured?: boolean };
 }
 
-/** Course cost for a typical build, shown before committing. */
-function costLine(setup: SetupInfo, modules = 8): string {
-  const usd = setup.cost.baseUsd + setup.cost.perModuleUsd * modules;
-  if (usd <= 0) return "free · local model";
-  const s = usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
-  return `~${s} once · your key, at cost`;
+/**
+ * A cost RANGE for a typical build, shown before the concept count is known. A
+ * single "8 modules" figure read as a promise and courses run 8 to 20 concepts,
+ * so it was systematically optimistic. The exact number is shown at the plan
+ * review, once you have chosen how many concepts to keep.
+ */
+function costLine(setup: SetupInfo): string {
+  const lo = setup.cost.baseUsd + setup.cost.perModuleUsd * 8;
+  const hi = setup.cost.baseUsd + setup.cost.perModuleUsd * 18;
+  if (hi <= 0) return "free · local model";
+  const fmt = (u: number) => (u < 0.01 ? "<$0.01" : `$${u.toFixed(2)}`);
+  return `~${fmt(lo)} to ${fmt(hi)} once · your key, at cost · exact figure at plan review`;
 }
 type Contextia = "redact" | "block" | "off";
 
 const TEMPLATES: { label: string; depth: Depth; text: string }[] = [
   {
-    label: "Developer onboarding",
+    label: "Someone new joins",
     depth: "scratch",
-    text: "Bring a new developer up to speed on our service in two weeks: the architecture, the deploy flow, and the critical parts of the code. They're a senior generalist but don't know our domain. (Attach the repo path and runbooks below.)",
+    text: "Bring someone new up to speed on how we work here: the process end to end, the tools we use, and the parts where a mistake is expensive. They know the trade but not our version of it. Two weeks before they work unsupervised. (Attach the procedures and notes below.)",
   },
   {
-    label: "Sysadmin onboarding",
+    label: "Someone is leaving",
     depth: "operational",
-    text: "Onboard a sysadmin on our infrastructure: network, firewalls, recovery procedures, operational runbooks. They must be able to handle on-call within a month. (Attach runbooks and docs; addresses and server names stay protected by Contextia.)",
+    text: "A colleague is leaving in a month and takes with them everything they know about this job: the procedures, the exceptions, the workarounds nobody wrote down, who to call when it breaks. Turn what they have written into something their replacement can actually learn from. (Attach their documents.)",
   },
-  { label: "Interview prep (example)", depth: "operational", text: EXAMPLE },
+  { label: "Preparing for an exam", depth: "operational", text: EXAMPLE },
 ];
 
 const DEPTHS: { key: Depth; label: string; hint: string }[] = [
@@ -133,16 +146,24 @@ export default function CreatePage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
-      <div className="flex items-center justify-between">
-        <Link
-          href="/courses"
-          aria-label="Ferrata: my courses"
-          className="inline-flex items-center gap-2 text-text-muted transition hover:text-text"
-        >
-          <FerrataMark className="h-7 w-7 text-text" />
-          <span className="text-step--1">← My courses</span>
-        </Link>
-        <ThemeToggle />
+      {/* The same main menu as everywhere else: a fresh examiner lands here
+          right after registering, and without the nav the only way to reach
+          Settings to add a key was to guess. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-center gap-6">
+          <Link
+            href="/courses"
+            aria-label="Ferrata: my courses"
+            className="shrink-0 text-text-muted transition hover:text-text"
+          >
+            <FerrataMark className="h-7 w-7 text-text" />
+          </Link>
+          <AppNav />
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <ThemeToggle />
+          <UserMenu />
+        </div>
       </div>
 
       <div className="mt-8">
@@ -199,7 +220,7 @@ export default function CreatePage() {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={6}
-              placeholder="e.g. Onboard a new on-call engineer on our edge gateway and how incidents actually play out. Two weeks."
+              placeholder="e.g. Someone takes over this job in two weeks. What they need to know, and what goes wrong if they do not."
               className="w-full resize-y rounded-lg border border-border bg-surface p-4 font-serif text-step-0 leading-relaxed text-text shadow-sm placeholder:text-text-muted focus:border-text-muted focus-visible:outline-none"
             />
             <div className="mt-3">
@@ -308,7 +329,7 @@ export default function CreatePage() {
                 value={urls}
                 onChange={(e) => setUrls(e.target.value)}
                 rows={2}
-                placeholder="https://wiki.acme.com/onboarding/edge-gateway"
+                placeholder="https://wiki.example.com/handbook/the-process"
                 className="mt-2 w-full resize-y rounded-lg border border-border bg-surface px-3 py-2.5 font-mono text-step--1 text-text placeholder:text-text-muted focus:border-text-muted focus-visible:outline-none"
               />
               {/* The whole row is the target: a 16px box is unusable on a phone. */}
@@ -450,7 +471,7 @@ export default function CreatePage() {
                   type="text"
                   value={level}
                   onChange={(e) => setLevel(e.target.value)}
-                  placeholder="never ran BGP"
+                  placeholder="knows the trade, new to how we do it"
                   className={inputClass}
                 />
               </Field>

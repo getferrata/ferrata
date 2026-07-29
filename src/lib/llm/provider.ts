@@ -29,6 +29,13 @@ export interface LlmUsage {
 export interface LlmCompletion {
   text: string;
   usage: LlmUsage;
+  /**
+   * True when the provider stopped because the output hit the token cap, not
+   * because the model finished. A structured task can then retry: json-repair
+   * happily salvages a cut-off object, so without this signal a module body that
+   * stops mid-sentence would pass schema validation and ship truncated.
+   */
+  truncated: boolean;
 }
 
 export interface LlmProvider {

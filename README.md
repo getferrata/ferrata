@@ -25,7 +25,8 @@ AI provider is your choice, under your own key, at cost.
   model sees it: secrets are stripped, internal addresses are shielded and
   restored into the finished course.
 - **Provider agnostic.** Works with hosted models or a local one. Keys are
-  stored locally and generation runs under your account.
+  stored locally, generation runs under your account, and one button checks a
+  model against the whole pipeline before you build a course with it.
 - **Linked knowledge bases.** Paste wiki links, optionally crawl same-site
   subpages (robots.txt respected), and store per-site tokens for pages behind
   sign-in.
@@ -67,20 +68,68 @@ same options are available as environment variables in `.env.local`:
 | `FERRATA_DB_PATH` | SQLite database location (default `./ferrata.db`) |
 | `FERRATA_ALLOW_PRIVATE_URLS=1` | allow fetching wiki links on private addresses (self-hosted networks) |
 | `FERRATA_REPO_ROOTS` | allowlisted roots for local repository ingestion |
-| `FERRATA_SECRET_KEY` | encrypts stored provider keys and wiki tokens at rest |
+| `FERRATA_SECRET_KEY` | encrypts stored provider keys and wiki tokens at rest, and salts protected-value tokens |
 | `FERRATA_OPEN_REGISTRATION` | `1` reopens sign-up; closed by default after the first account |
+| `FERRATA_EXPORT_DIR` | directory allowed for package and note exports (default: system temp) |
 
 Settings saved in the app take precedence over the environment.
 
-## Tests
+## Benchmarks and tests
+
+Ferrata is measured, not asserted. Everything here is reproducible from a clean
+checkout.
 
 ```
-pnpm test        # unit
-pnpm test:e2e    # full journeys against a deterministic mock model
+pnpm vitest run   # unit tests
+pnpm test:e2e     # full journeys against a deterministic mock model
+pnpm typecheck    # strict TypeScript
+pnpm build        # production build
 ```
 
-The e2e suite drives the real pipeline (jobs, statuses, UI) with a local mock
-provider, so it runs in about two minutes with no key and no cost.
+The end to end suite drives the real pipeline (background worker, generation,
+review, export) with a local mock provider, so it runs in a couple of minutes
+with no key and no cost.
+
+**Data protection is deterministic.** On the secrets fixture, an author who
+selects "off" still leaks zero secrets while the operator floor is `redact`: the
+choice is clamped up to the floor. "Block" refuses a source with critical
+secrets outright. Text passes through untouched only when the operator sets the
+floor to `off` themselves.
+
+**Runs on a normal server.** The self host target is a company VM with no GPU. On
+a 4 vCPU, 15 GB machine, a 3B local model produces a full five module grounded
+course, with its tests, in about half an hour. Generation is a background job of
+minutes by design, which is why authoring is an async wizard you can close and
+return to.
+
+**On a hosted model.** One course built from a source repository of 131 files, on
+a 4 hour study budget, came to 14 modules and 52 test questions, at $0.28 a
+module for the calls the course kept. That is one course on one repository, not a
+price list: material grounded generation carries the retrieved excerpts into
+every module call, so a course written from a short brief costs materially less.
+Generation is billed to your own key, and every course shows a receipt of what it
+spent beside the estimate it gave beforehand, so the estimate can be checked
+rather than believed.
+
+**Check a model before you spend on it.** Settings has a preflight: one pass
+through all eight stages of the pipeline over a small built in fixture, with the
+models you have chosen. It reports what each stage produced, what it cost, and
+whether any call had to be made twice. A few hundred tokens, so a model that does
+not suit Ferrata costs a fraction of a cent to find out about instead of half a
+course.
+
+## Something wrong, something missing
+
+- **A bug**: [open an issue](https://github.com/getferrata/ferrata/issues/new?template=bug_report.yml).
+  What you did and what you saw instead is enough to start.
+- **A feature**: [describe the situation](https://github.com/getferrata/ferrata/issues/new?template=feature_request.yml).
+  Where the tool got in your way is more useful than a proposed solution.
+- **A vulnerability**: report it privately through a
+  [security advisory](https://github.com/getferrata/ferrata/security/advisories/new),
+  not in a public issue. See `SECURITY.md`.
+
+Either way, never paste keys, tokens, internal hostnames or your own material
+into an issue: they are public.
 
 ## Deploy
 

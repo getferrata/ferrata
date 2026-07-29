@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/session";
 import { SiteHeader } from "@/components/site-header";
 import { LlmSettingsForm } from "./llm-form";
 import { ConnectionsPanel } from "./connections";
+import { PreflightPanel } from "./preflight";
 import { CreditLimitForm } from "@/components/credit-limit-form";
 import { creditLimit, creditWindowMs } from "@/lib/llm/credits";
 
@@ -30,6 +31,7 @@ export default async function SettingsPage() {
           to the provider itself.
         </p>
         <LlmSettingsForm />
+        <PreflightPanel />
         <CreditLimitForm
           initialLimit={creditLimit()}
           initialWindowDays={Math.round(creditWindowMs() / (24 * 60 * 60 * 1000))}

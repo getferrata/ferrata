@@ -8,7 +8,11 @@ import { z } from "zod";
  */
 export const moduleSchema = z.object({
   title: z.string().min(1),
-  bodyMd: z.string().min(400),
+  // A floor, not a quality bar. A legitimately concise depth-0 module used to
+  // fail validation at 400 and burn every retry, each one re-sending the prior
+  // output, so the cheapest module became the most expensive. Length is judged
+  // by the depth-aware soft check in verify.ts instead.
+  bodyMd: z.string().min(200),
 });
 
 export type ModuleResult = z.infer<typeof moduleSchema>;

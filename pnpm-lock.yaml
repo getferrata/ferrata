@@ -8,18 +8,13 @@ overrides:
   sharp: '>=0.35.3'
   postcss: '>=8.5.22'
 
-patchedDependencies:
-  '@sbr0nch/contextia-engine@2.0.2':
-    hash: 3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3
-    path: patches/@sbr0nch__contextia-engine@2.0.2.patch
-
 importers:
 
   .:
     dependencies:
       '@sbr0nch/contextia-engine':
-        specifier: ^2.0.2
-        version: 2.0.2(patch_hash=3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3)
+        specifier: ^2.0.3
+        version: 2.0.3
       better-sqlite3:
         specifier: ^11.8.1
         version: 11.10.0
@@ -56,6 +51,9 @@ importers:
       ts-fsrs:
         specifier: ^4.7.0
         version: 4.7.1
+      undici:
+        specifier: ^8.9.0
+        version: 8.9.0
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -1075,8 +1073,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@sbr0nch/contextia-engine@2.0.2':
-    resolution: {integrity: sha512-2LH6gvF8fDpOxohneoFx1mfgTSY4KT6bC+M5v9gXU4pBHXfs9/IAM3L8a0/xLuxV4DOnKApB/Xeyu0BuBa5t3g==}
+  '@sbr0nch/contextia-engine@2.0.3':
+    resolution: {integrity: sha512-fDEya9NlHXgHJxm1S9SCjMdg7Gg+rNtVSsBbQ9zB5cQTWt1xV2OzaDfyKr2PWo0NLCtkJhvJP6iN3bfZChqW1w==}
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -2057,6 +2055,10 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
+  undici@8.9.0:
+    resolution: {integrity: sha512-aWZpUj7XoGonMClx4gdDRfgBjqeA+F473aDmROQQbM9n6PRfK/u1q/a0X4wMTgcHfT8H6fpbt98PFuDUwFg2YA==}
+    engines: {node: '>=22.19.0'}
+
   update-browserslist-db@1.2.3:
     resolution: {integrity: sha512-Js0m9cx+qOgDxo0eMiFGEueWztz+d4+M3rGlmKPT+T4IS/jP4ylw3Nwpu6cpTTP8R1MAC1kF4VbdLt3ARf209w==}
     hasBin: true
@@ -2689,7 +2691,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
 
-  '@sbr0nch/contextia-engine@2.0.2(patch_hash=3b4b4f75310dab5eff88dcfed9d4bd979b7ecb097f91b1366e8b2987972e51d3)': {}
+  '@sbr0nch/contextia-engine@2.0.3': {}
 
   '@swc/helpers@0.5.15':
     dependencies:
@@ -3697,6 +3699,8 @@ snapshots:
   underscore@1.13.8: {}
 
   undici-types@6.21.0: {}
+
+  undici@8.9.0: {}
 
   update-browserslist-db@1.2.3(browserslist@4.28.7):
     dependencies:

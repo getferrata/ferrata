@@ -30,8 +30,10 @@ describe("scanSensitivity (Contextia DLP gate)", () => {
     const r = await scanSensitivity(text, "runbook.md");
     // the real value is gone from the text…
     expect(r.text).not.toContain("10.0.0.5");
-    // …replaced by a restore token, and captured for later restoration
-    expect(r.text).toMatch(/⟨cxt:[0-9a-f]{10}⟩/);
+    // …replaced by a restore token, and captured for later restoration. The
+    // token is an HMAC (not a plain hash), so it cannot be reversed to the IP
+    // from a shared package without the install's key.
+    expect(r.text).toMatch(/⟨cxt:[0-9a-f]{16}⟩/);
     expect(r.restorations.length).toBe(1);
     expect(r.restorations[0]!.value).toBe("10.0.0.5");
     expect(r.verdict!.protectedValues).toBe(1);
@@ -166,5 +168,26 @@ describe("findings that overlap", () => {
     for (const restoration of r.restorations) {
       expect(restoration.value).not.toContain("hunter2");
     }
+  });
+});
+
+describe("the placeholder key survives a restart", () => {
+  it("gives the same host the same placeholder across scans", async () => {
+    // A key generated per process meant material added after a restart got a
+    // different placeholder for the same host, so one machine appeared in the
+    // course as two protected values, and the model, told to reproduce them
+    // verbatim, saw two. The key is stored, so it outlives the process.
+    delete process.env.FERRATA_SECRET_KEY;
+    const first = await scanSensitivity(
+      "The gateway lives at 10.1.2.3 today.",
+      "runbook.md",
+    );
+    const second = await scanSensitivity(
+      "Later notes also mention 10.1.2.3 for the gateway.",
+      "notes.md",
+    );
+    const token = (s: string) => s.match(/\u27e8cxt:[0-9a-f]+\u27e9/)?.[0];
+    expect(token(first.text)).toBeDefined();
+    expect(token(second.text)).toBe(token(first.text));
   });
 });

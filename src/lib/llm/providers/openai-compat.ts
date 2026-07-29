@@ -123,7 +123,7 @@ export class OpenAICompatProvider implements LlmProvider {
     }
 
     const data = (await res.json()) as {
-      choices: { message: { content: string | null } }[];
+      choices: { message: { content: string | null }; finish_reason?: string }[];
       usage?: { prompt_tokens: number; completion_tokens: number };
     };
 
@@ -133,6 +133,7 @@ export class OpenAICompatProvider implements LlmProvider {
         tokensIn: data.usage?.prompt_tokens ?? 0,
         tokensOut: data.usage?.completion_tokens ?? 0,
       },
+      truncated: data.choices[0]?.finish_reason === "length",
     };
   }
 }

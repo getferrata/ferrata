@@ -6,7 +6,6 @@ import { buildPackage } from "@/lib/package/format";
 import { slug, writePackage } from "@/lib/package/export";
 import { newId, now } from "@/lib/util/id";
 import { getCurrentUser } from "@/lib/auth/session";
-import { canSeeCourse } from "@/lib/course/access";
 
 export const runtime = "nodejs";
 
@@ -21,18 +20,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id } = await params;
-  // The package carries the whole course. Signing in is the minimum, and a
-  // student only gets the courses they were actually assigned.
+  // The package carries the whole course, answer keys included, so it is an
+  // authoring artifact, not a study one: examiner, own course only. Letting an
+  // enrolled student export it would hand them the answer key an assessed course
+  // deliberately withholds from the page and the review API.
   const me = await getCurrentUser();
-  if (!me) {
-    return NextResponse.json({ error: "not authenticated" }, { status: 401 });
-  }
-  if (!canSeeCourse(id, { userId: me.id, role: me.role })) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!me || me.role !== "examiner") {
+    return NextResponse.json({ error: "examiners only" }, { status: 403 });
   }
   const bundle = getCourseBundle(id);
   if (!bundle) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  if (bundle.course.ownerId && bundle.course.ownerId !== me.id) {
+    return NextResponse.json({ error: "not your course" }, { status: 403 });
   }
   if (bundle.course.status !== "ready") {
     return NextResponse.json({ error: "course not ready" }, { status: 409 });
@@ -72,18 +73,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id } = await params;
-  // The package carries the whole course. Signing in is the minimum, and a
-  // student only gets the courses they were actually assigned.
+  // Writes the whole course, answer keys included, to the server's disk:
+  // examiner, own course only, same as the download above.
   const me = await getCurrentUser();
-  if (!me) {
-    return NextResponse.json({ error: "not authenticated" }, { status: 401 });
-  }
-  if (!canSeeCourse(id, { userId: me.id, role: me.role })) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!me || me.role !== "examiner") {
+    return NextResponse.json({ error: "examiners only" }, { status: 403 });
   }
   const bundle = getCourseBundle(id);
   if (!bundle) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  if (bundle.course.ownerId && bundle.course.ownerId !== me.id) {
+    return NextResponse.json({ error: "not your course" }, { status: 403 });
   }
   if (bundle.course.status !== "ready") {
     return NextResponse.json({ error: "course not ready" }, { status: 409 });

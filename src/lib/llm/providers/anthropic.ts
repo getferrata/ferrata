@@ -86,6 +86,7 @@ export class AnthropicProvider implements LlmProvider {
     const data = (await res.json()) as {
       content: { type: string; text?: string }[];
       usage: { input_tokens: number; output_tokens: number };
+      stop_reason?: string;
     };
 
     const text = data.content
@@ -99,6 +100,7 @@ export class AnthropicProvider implements LlmProvider {
         tokensIn: data.usage.input_tokens,
         tokensOut: data.usage.output_tokens,
       },
+      truncated: data.stop_reason === "max_tokens",
     };
   }
 }

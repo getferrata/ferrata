@@ -354,6 +354,15 @@ samp,
   vertical-align: 0.08em;
 }
 
+/* A citation naming a document the course does not have. Marked rather than
+   hidden: a wrong citation that looks right is worse than a visible one. */
+.reading-prose .cite-unknown {
+  color: var(--danger);
+  border-color: var(--danger);
+  border-style: dashed;
+  background-color: transparent;
+}
+
 /* Movement is near-nil and only orients. Honor the OS setting. */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -40,7 +40,12 @@ export class OllamaProvider implements LlmProvider {
           messages,
           stream: false,
           ...(req.jsonMode ? { format: "json" } : {}),
-          options: { temperature: req.temperature ?? 0.4 },
+          options: {
+            temperature: req.temperature ?? 0.4,
+            // Without num_predict Ollama caps output at its own default, which
+            // silently truncates a long module body. Honour the per-task budget.
+            ...(req.maxTokens ? { num_predict: req.maxTokens } : {}),
+          },
         }),
       });
     } catch (cause) {
@@ -60,6 +65,7 @@ export class OllamaProvider implements LlmProvider {
       message?: { content?: string };
       prompt_eval_count?: number;
       eval_count?: number;
+      done_reason?: string;
     };
 
     return {
@@ -68,6 +74,7 @@ export class OllamaProvider implements LlmProvider {
         tokensIn: data.prompt_eval_count ?? 0,
         tokensOut: data.eval_count ?? 0,
       },
+      truncated: data.done_reason === "length",
     };
   }
 }

@@ -143,8 +143,10 @@ describe("what leaves the machine in a package", () => {
       expect(out).not.toContain(secret);
     }
     // The placeholders travel instead, so the course still reads correctly for
-    // anyone who imports it into an instance that holds the restore map.
-    expect(out).toMatch(/⟨cxt:[0-9a-f]{10}⟩/);
+    // anyone who imports it into an instance that holds the restore map. They are
+    // HMAC tokens (16 hex), not a plain hash, so the real values cannot be
+    // recovered from the package by brute force.
+    expect(out).toMatch(/⟨cxt:[0-9a-f]{16}⟩/);
   });
 
   it("carries no restore map: the recipient gets placeholders and nothing to resolve them with", async () => {

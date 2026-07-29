@@ -50,6 +50,16 @@ export function CourseReceipt({
         is the whole build, retries included, so it should match your provider
         dashboard for the same period.
       </p>
+      {spend.estimatedCalls > 0 ? (
+        <p className="mt-2 max-w-measure text-step--1 text-text-muted">
+          {spend.estimatedCalls === spend.calls
+            ? "This model is not in the price list"
+            : `${spend.estimatedCalls} of these calls used a model not in the price list`}
+          , so the figure above is priced at the highest rate Ferrata knows.
+          Treat it as a ceiling, not a reading, and check your provider
+          dashboard for the real number.
+        </p>
+      ) : null}
     </details>
   );
 }

@@ -24,8 +24,20 @@ export interface RubricReport {
   pass: boolean;
 }
 
+// Analogy cues across the languages the product sells into. A single-language
+// list made every non-Italian course fail this check even when the analogy was
+// there, capping the score and reporting a defect that did not exist. Some of
+// these over-match, which is fine for a weight-1 guardrail: a false positive is
+// cheap, a false negative silently degrades the score for a whole language.
 const ANALOGY_CUES =
-  /\b(come|è come|come se|immagina|pensa a|analog\w*|l'equivalente|equivalente|funziona come|è l['a]|alla stregua|proprio come|like|imagine|think of|analog\w*)\b/i;
+  /\b(come|è come|come se|immagina|pensa a|analog\w*|l'equivalente|funziona come|alla stregua|proprio come|like|imagine|think of|picture it|similar to|akin to|wie|stell dir vor|als ob|vergleichbar|ähnlich wie|comme|imaginez|comme si|à la manière|pense à|semblable à|como|imagina|imagine|como si|como se|piensa en|pensa em|parecido a|semelhante a|zoals|stel je voor|alsof|vergelijkbaar)\b/i;
+
+// A number only anchors a paragraph if it is "meaningful": multi-digit or part
+// of a token (a port, a version, an IP, a timeout), or a number with a unit.
+// A bare single digit ("there are 3 ways") used to satisfy the specificity gate
+// by itself, which made it gameable with number-stuffing.
+const MEANINGFUL_NUM =
+  /\b\d[\d.,:/]+\b|\b\d+\s*(%|ms|sec|secs?|seconds?|min(?:utes?)?|hours?|hrs?|days?|GB|MB|KB|Gi|Mi|Ki|bytes?|kb|port|ports|req|rps|qps|replicas?|nodes?|pods?)\b/i;
 
 /** Strip fenced code blocks so diagrams/config don't skew prose checks. */
 function stripCode(md: string): string {
@@ -41,7 +53,7 @@ function paragraphs(md: string): string[] {
 
 /** Does a paragraph carry any anchor: a number, a proper noun, an anchor term? */
 function isAnchored(paragraph: string, anchors: string[]): boolean {
-  if (/\d/.test(paragraph)) return true;
+  if (MEANINGFUL_NUM.test(paragraph)) return true;
   for (const a of anchors) {
     if (a.length >= 2 && paragraph.toLowerCase().includes(a.toLowerCase()))
       return true;
@@ -75,7 +87,10 @@ export function runRubrics(
   const anchoredParas = paras.filter((p) => isAnchored(p, ctx.anchorTerms));
   const specificity = paras.length ? anchoredParas.length / paras.length : 0;
 
-  const numericTokens = (stripped.match(/\b\d[\d.,:/]*\b/g) ?? []).length;
+  // Count only meaningful numbers, so "concrete density" cannot be gamed by
+  // sprinkling bare single digits into otherwise generic prose.
+  const numericTokens = (stripped.match(new RegExp(MEANINGFUL_NUM, "gi")) ?? [])
+    .length;
 
   const checks: Check[] = [
     {

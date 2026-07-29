@@ -9,15 +9,25 @@ import { join } from "node:path";
  * fixed number of older files (ferrata.log.1 ... ferrata.log.N).
  *
  * Env:
- *   FERRATA_LOG_LEVEL     debug | info | warn | error   (default: info)
+ *   FERRATA_LOG_LEVEL     debug | info | warn | error | silent  (default: info)
  *   FERRATA_LOG_DIR       directory for log files       (default: unset, console only)
  *   FERRATA_LOG_MAX_KB    rotate when file exceeds this (default: 5120)
  *   FERRATA_LOG_KEEP      rotated files to keep         (default: 5)
  */
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 
-const LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+// `silent` sits above every real level, so nothing is ever at or over it. It
+// exists for the test suite: several tests deliberately drive failure paths that
+// the code is right to log, and a passing run that prints ERROR lines reads as a
+// broken one to anybody who has not memorised which failures are on purpose.
+const LEVEL_RANK: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+  silent: 99,
+};
 
 const FILE_NAME = "ferrata.log";
 

@@ -3,7 +3,8 @@ import {
   detectors,
   type Finding,
 } from "@sbr0nch/contextia-engine";
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
+import { getSetting, setSetting } from "@/lib/settings";
 
 /**
  * DLP gate, backed by Contextia (on-device secret/PII detection). Source text
@@ -105,8 +106,45 @@ export interface ScanResult {
   blocked: boolean;
 }
 
+// The placeholder must not be reversible from an exported package. A plain
+// sha256 of the value is: the space of private IPs and internal hostnames is
+// tiny, so a rainbow table recovers the real topology from a shared .ferrata
+// file in seconds. HMAC it with a per-install key instead, so the token carries
+// no information without that key, which is never in the package.
+const TOKEN_KEY_SETTING = "contextia_token_key";
+
+let cachedKey: string | null = null;
+
+/**
+ * The key the placeholders are derived from.
+ *
+ * FERRATA_SECRET_KEY when the operator set one. Otherwise a key generated once
+ * and kept in the settings table, rather than once per process: a random
+ * per-process key meant that material added after a restart produced a
+ * different placeholder for the same host, so one machine appeared in a course
+ * as two different protected values, and the model, told to reproduce them
+ * verbatim, saw two. Correctness here outlives the process that started it.
+ */
+function tokenKey(): string {
+  const fromEnv = process.env.FERRATA_SECRET_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  if (cachedKey) return cachedKey;
+  const stored = getSetting(TOKEN_KEY_SETTING);
+  if (stored) {
+    cachedKey = stored;
+    return stored;
+  }
+  const fresh = randomBytes(32).toString("hex");
+  setSetting(TOKEN_KEY_SETTING, fresh);
+  cachedKey = fresh;
+  return fresh;
+}
+
 function tokenFor(value: string): string {
-  const h = createHash("sha256").update(value).digest("hex").slice(0, 10);
+  const h = createHmac("sha256", tokenKey())
+    .update(value)
+    .digest("hex")
+    .slice(0, 16);
   return `⟨cxt:${h}⟩`; // ⟨cxt:hash⟩
 }
 

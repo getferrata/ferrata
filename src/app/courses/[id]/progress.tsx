@@ -18,6 +18,7 @@ const STAGE_COPY: Record<string, string> = {
   graphing: "Setting the anchors",
   triaging: "Trimming to the time budget",
   generating: "Fixing the cable",
+  finishing: "Writing the study plan and the glossary",
 };
 
 const CLIMB_STATES = new Set([
@@ -26,6 +27,7 @@ const CLIMB_STATES = new Set([
   "graphing",
   "triaging",
   "generating",
+  "finishing",
 ]);
 
 interface InterviewQuestion {
@@ -72,6 +74,9 @@ export function PipelineProgress({ id }: { id: string }) {
       setData(payload);
       const s = payload.course.status;
       if (s === "ready") {
+        // refresh() re-renders the server component, which swaps this screen for
+        // the course. If it is slow or fails, the "ready" state below gives the
+        // author a link rather than a finished bar and nothing to click.
         router.refresh();
         return;
       }
@@ -224,6 +229,24 @@ export function PipelineProgress({ id }: { id: string }) {
           void poll();
         }}
       />
+    );
+  } else if (status === "ready") {
+    // The refresh above normally swaps this whole screen for the course, so
+    // this is the fallback for when it has not landed yet. A finished build
+    // with nothing to click reads as a build that got stuck.
+    body = (
+      <div className="max-w-measure">
+        <h2 className="font-serif text-step-2">The route is rigged.</h2>
+        <p className="mt-3 text-text-muted">
+          Every module is written and every test is in place.
+        </p>
+        <a
+          href={`/courses/${id}`}
+          className="mt-5 inline-flex min-h-[44px] items-center self-start rounded border border-text px-5 text-text transition hover:bg-bg-subtle"
+        >
+          Open the course
+        </a>
+      </div>
     );
   } else {
     body = <Spinner label="Getting things ready…" />;

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue
+    url: https://github.com/getferrata/ferrata/security/advisories/new
+    about: >
+      Report it privately instead. Ferrata handles other people's material and
+      provider keys, so a vulnerability should not be public before there is a
+      fix.
+  - name: How it works, and what is coming
+    url: https://getferrata.github.io
+    about: The project site, with the benchmarks and what is planned next.

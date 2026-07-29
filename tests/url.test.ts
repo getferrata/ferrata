@@ -28,8 +28,20 @@ describe("assertPublicUrl (SSRF guard)", () => {
     }
   });
   it("allows a public IP literal", async () => {
-    const u = await assertPublicUrl("https://1.1.1.1/page");
-    expect(u.hostname).toBe("1.1.1.1");
+    const checked = await assertPublicUrl("https://1.1.1.1/page");
+    expect(checked.url.hostname).toBe("1.1.1.1");
+    // Nothing to pin: the URL already names the address, so there is no second
+    // lookup for a hostile resolver to answer differently.
+    expect(checked.address).toBeNull();
+  });
+
+  it("carries out the address it validated, so the fetch can pin to it", async () => {
+    // Validating a hostname and then handing the hostname to fetch resolves it
+    // twice: a resolver with a zero TTL can answer public first and internal
+    // second. The address checked here is the one connected to.
+    const checked = await assertPublicUrl("https://example.com/page");
+    expect(checked.url.hostname).toBe("example.com");
+    expect(checked.address).toMatch(/^[0-9a-f.:]+$/i);
   });
 });
 

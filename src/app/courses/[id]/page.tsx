@@ -10,6 +10,9 @@ import { SiteHeader } from "@/components/site-header";
 import { requireUser } from "@/lib/auth/session";
 import { canSeeCourse } from "@/lib/course/access";
 import { studentDeadline } from "@/lib/course/invite";
+import { pendingProposals } from "@/lib/course/proposals";
+import { jobs } from "@/db/schema";
+import { eq as eqJobs } from "drizzle-orm";
 import { PipelineProgress } from "./progress";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +39,10 @@ export default async function CoursePage({
   if (!canSeeCourse(id, { userId: user.id, role: user.role })) notFound();
   const bundle = getCourseBundle(id);
   if (!bundle) notFound();
+
+  const canEdit =
+    user.role === "examiner" &&
+    (!bundle.course.ownerId || bundle.course.ownerId === user.id);
 
   if (bundle.course.status === "ready") {
     let resume: { moduleId: string; title: string } | null = null;
@@ -71,6 +78,18 @@ export default async function CoursePage({
           bundle={bundle}
           verifiedByName={verifierName(bundle.course.verifiedBy)}
           canVerify={user.role === "examiner"}
+          canEdit={canEdit}
+          proposals={
+            canEdit
+              ? pendingProposals(id).map((p) => ({
+                  id: p.id,
+                  kind: p.kind,
+                  title: p.title,
+                  reason: p.reason,
+                }))
+              : []
+          }
+          analysing={canEdit ? analysingCourse(id) : false}
           userId={user.role === "student" ? user.id : undefined}
           deadline={
             user.role === "student" ? studentDeadline(id, user.id) : null
@@ -104,4 +123,18 @@ function verifierName(userId: string | null): string | null {
     .where(eq(users.id, userId))
     .get();
   return row?.name ?? "someone here";
+}
+
+/** True while a propose_updates job for this course is queued or running. */
+function analysingCourse(courseId: string): boolean {
+  return db
+    .select({ status: jobs.status, payloadJson: jobs.payloadJson })
+    .from(jobs)
+    .where(eqJobs(jobs.type, "propose_updates"))
+    .all()
+    .some(
+      (j) =>
+        (j.status === "queued" || j.status === "running") &&
+        j.payloadJson.includes(`"${courseId}"`),
+    );
 }

@@ -74,10 +74,13 @@ function respond(system) {
     };
   }
   if (system.includes("module-writing stage")) {
-    return { title: "Module", bodyMd: MODULE_BODY };
+    // The real write_module task speaks a delimiter format, not JSON, so the
+    // mock answers in it too: the app exercises the real parse path.
+    return `TITLE: Module\n---BODY---\n${MODULE_BODY}`;
   }
   if (system.includes("concreteness pass")) {
-    return { bodyMd: MODULE_BODY, notes: [] };
+    // Delimiter format here too, for the same reason as the writing stage.
+    return `NOTES:\n- named the pool the runbook names\n---BODY---\n${MODULE_BODY}`;
   }
   if (system.includes("quality judge")) {
     return { pass: true, score: 0.92, issues: [], specificityViolations: [] };
@@ -101,24 +104,75 @@ function respond(system) {
           options: null,
           misconceptions: [],
         },
+        // A graded pair, so the journey covers the formats the server settles
+        // rather than only the ones the student grades for themselves.
+        {
+          prompt: "Which service terminates inbound TLS?",
+          expectedAnswer: "The edge gateway: it is the single front door.",
+          bloomLevel: "remember",
+          format: "mcq",
+          options: {
+            options: ["The API service", "The edge gateway", "Postgres"],
+            correctIndex: 1,
+          },
+          misconceptions: [],
+        },
+        {
+          prompt: "A 503 at the edge means the backend pool is ___ .",
+          expectedAnswer: "empty, with no healthy backend to route to.",
+          bloomLevel: "remember",
+          format: "cloze",
+          blanks: [{ accept: ["empty", "vuoto"] }],
+          options: null,
+          misconceptions: [],
+        },
+      ],
+    };
+  }
+  if (system.includes("update-review stage")) {
+    return {
+      proposals: [
+        {
+          kind: "update_module",
+          conceptIndex: 0,
+          candidate: null,
+          reason: "The new runbook moves the health check from /healthz to /livez.",
+        },
+        {
+          kind: "add_concept",
+          conceptIndex: null,
+          candidate: {
+            title: "Rate limiting at the edge",
+            summary: "The gateway sheds load before the pool empties.",
+            priority: "high",
+            estimatedMinutes: 25,
+            depthLevel: 2,
+          },
+          reason: "The new material documents a limiter in front of the pool.",
+        },
+        {
+          kind: "retire_concept",
+          conceptIndex: 2,
+          candidate: null,
+          reason: "The new material says failover is now the platform team's job.",
+        },
       ],
     };
   }
   if (system.includes("scheduler of Ferrata")) {
-    return {
-      scheduleMd:
-        "## Study plan\n\n" +
-        "Day 1: the edge gateway, then reading a 503.\n\n" +
-        "Day 2: failover, then the review session to anchor what slipped.",
-    };
+    // Delimiter format: one long markdown document, never JSON.
+    return (
+      "---BODY---\n## Study plan\n\n" +
+      "Day 1: the edge gateway, then reading a 503.\n\n" +
+      "Day 2: failover, then the review session to anchor what slipped."
+    );
   }
   if (system.includes("glossary stage")) {
-    return {
-      glossaryMd:
-        "**VIP**: the shared virtual address the gateways answer on.\n\n" +
-        "**Readiness probe**: the check a backend must pass before taking traffic.\n\n" +
-        "**Pool**: the set of healthy backends the gateway can route to.",
-    };
+    return (
+      "---BODY---\n**VIP**: the shared virtual address the gateways answer on.\n\n" +
+      "**Readiness probe**: the check a backend must pass before taking traffic.\n\n" +
+      "**Pool**: the set of healthy backends the gateway can route to."
+    );
   }
   if (system.includes("Feynman coach")) {
     return { strengths: "Clear on routing.", gap: "What empties the pool.", complete: false };
@@ -149,10 +203,13 @@ const server = http.createServer((req, res) => {
       // fall through with empty system
     }
     const payload = respond(system);
+    // A task that speaks a delimiter format (write_module) returns a raw string;
+    // everything else returns an object serialised as JSON.
+    const content = typeof payload === "string" ? payload : JSON.stringify(payload);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
-        choices: [{ message: { role: "assistant", content: JSON.stringify(payload) } }],
+        choices: [{ message: { role: "assistant", content } }],
         usage: { prompt_tokens: 100, completion_tokens: 200 },
       }),
     );

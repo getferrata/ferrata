@@ -28,6 +28,23 @@ const PRICES: Record<string, Price> = {
   "llama-3.1-8b-instant": { in: 0.05, out: 0.08 },
 };
 
+/**
+ * What an unlisted model is assumed to cost: the most expensive rate here.
+ *
+ * The settings page lists models pulled live from the provider, so a model this
+ * table has never heard of is the normal case, not the exception. Pricing it at
+ * zero made every call free in the ledger, which made `spentBy` sum to zero,
+ * which made the credit ceiling never fire: a defence that believes it is armed
+ * and is not, which is worse than no defence at all. Overestimating stops
+ * generation early and says so; underestimating says nothing until the invoice.
+ */
+const UNKNOWN_MODEL_PRICE: Price = { in: 15, out: 75 };
+
+/** Whether the ledger figure for this model is a real price or the fallback. */
+export function isPriceKnown(provider: ProviderName, model: string): boolean {
+  return provider === "ollama" || model in PRICES;
+}
+
 export function estimateCostUsd(
   provider: ProviderName,
   model: string,
@@ -35,7 +52,6 @@ export function estimateCostUsd(
   tokensOut: number,
 ): number {
   if (provider === "ollama") return 0;
-  const p = PRICES[model];
-  if (!p) return 0;
+  const p = PRICES[model] ?? UNKNOWN_MODEL_PRICE;
   return (tokensIn * p.in + tokensOut * p.out) / 1_000_000;
 }

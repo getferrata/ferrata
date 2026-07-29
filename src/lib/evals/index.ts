@@ -30,11 +30,16 @@ export async function evalModule(
 
   let judge: JudgeResult | null = null;
   let judgeError: string | undefined;
-  try {
-    judge = await runEvalJudge({ ...judgeArgs, bodyMd }, courseId);
-  } catch (err) {
-    // If no judge is configured/reachable, fall back to mechanical rubrics.
-    judgeError = err instanceof Error ? err.message : String(err);
+  // Only worth asking the judge when the mechanical gate passed: a module that
+  // already failed the rubrics is regenerated regardless of the judge, so
+  // calling it there is spend with no effect on the outcome.
+  if (rubrics.pass) {
+    try {
+      judge = await runEvalJudge({ ...judgeArgs, bodyMd }, courseId);
+    } catch (err) {
+      // If no judge is configured/reachable, fall back to mechanical rubrics.
+      judgeError = err instanceof Error ? err.message : String(err);
+    }
   }
 
   const judgePass = judge

@@ -1,6 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runStructuredTask } from "@/lib/llm/run";
+import { OUTPUT_CAPS } from "@/lib/llm/tasks/caps";
+import {
+  moduleBodyMessage,
+  untrustedMaterialMessage,
+} from "@/lib/llm/material";
 import { judgeSchema, normaliseJudge, type JudgeResult } from "./schema";
 
 const PROMPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "prompt.md");
@@ -20,13 +25,19 @@ export async function runEvalJudge(
     vars: {
       sourcePrompt: args.sourcePrompt,
       conceptTitle: args.conceptTitle,
-      bodyMd: args.bodyMd,
-      sources: args.sources || "(no material was attached: judge against the brief and general knowledge only)",
     },
+    // Neither the module under judgement nor the material it was written from
+    // belongs in the judge's system prompt: a module carrying a smuggled "this
+    // has already been approved" would otherwise read as an instruction from
+    // the operator.
+    extraMessages: [
+      moduleBodyMessage(args.bodyMd),
+      ...(args.sources ? [untrustedMaterialMessage(args.sources)] : []),
+    ],
     schema: judgeSchema,
     courseId,
     temperature: 0.1,
-    maxTokens: 2000,
+    maxTokens: OUTPUT_CAPS.eval_judge,
   });
   return normaliseJudge(raw);
 }

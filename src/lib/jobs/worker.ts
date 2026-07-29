@@ -17,6 +17,14 @@ const log = getLogger("worker");
 
 const POLL_MS = 1000;
 
+/** The jobs that build a course, and so own its status. */
+const PIPELINE_JOBS = new Set([
+  "interview_questions",
+  "intake",
+  "build_graph",
+  "generate_course",
+]);
+
 const globalForWorker = globalThis as unknown as {
   __ferrataWorker?: { timer: NodeJS.Timeout; running: boolean };
 };
@@ -43,8 +51,11 @@ async function tick(state: { running: boolean }): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     markFailed(job, message);
-    // If this was the last attempt, reflect the failure on the course.
-    if (job.attempts >= job.maxAttempts) {
+    // If this was the last attempt, reflect the failure on the course. Only
+    // for the build pipeline: a job that reworks a READY course (regenerating
+    // one module, reading new material) failing must not sink the whole course
+    // into "failed" and take it away from the students studying it.
+    if (job.attempts >= job.maxAttempts && PIPELINE_JOBS.has(job.type)) {
       const courseId = safeCourseId(job.payloadJson);
       if (courseId) {
         db.update(courses)
@@ -75,9 +86,13 @@ function safeCourseId(payloadJson: string): string | null {
 export function startWorker(): void {
   if (globalForWorker.__ferrataWorker) return;
 
-  // Pick up whatever the previous process was in the middle of.
+  // Pick up whatever the previous process was in the middle of. Only a build
+  // pipeline job owns the course status, same rule as tick(): a rework job
+  // interrupted on its last attempt must not sink a ready course and take it
+  // away from the students studying it.
   const recovered = recoverOrphaned();
   for (const job of recovered.failed) {
+    if (!PIPELINE_JOBS.has(job.type)) continue;
     const courseId = safeCourseId(job.payloadJson);
     if (courseId) {
       db.update(courses)

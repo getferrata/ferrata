@@ -28,7 +28,8 @@ export type TaskName =
   | "schedule"
   | "glossary"
   | "eval_judge"
-  | "feynman";
+  | "feynman"
+  | "propose_updates";
 
 const TASK_TIER: Record<TaskName, Tier> = {
   // Context-critical judgment + the quality gate MUST use the strong model:
@@ -42,6 +43,10 @@ const TASK_TIER: Record<TaskName, Tier> = {
   write_module: "heavy",
   concreteness_pass: "heavy",
   write_questions: "heavy",
+  // Reads new material against a live course and recommends changes the
+  // author will act on: misjudging this wastes real approvals, so it is not
+  // a light task.
+  propose_updates: "heavy",
   // Genuinely mechanical / low-stakes: cheap model is fine.
   triage: "light",
   schedule: "light",

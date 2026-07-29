@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { restorations } from "@/db/schema";
 import { newId } from "@/lib/util/id";
+import { sealSecret } from "@/lib/crypto/secrets";
 import {
   scanSensitivity,
   type ContextiaMode,
@@ -70,7 +71,7 @@ export function saveRestorations(
         id: newId("cxt"),
         courseId,
         token: r.token,
-        value: r.value,
+        value: sealSecret(r.value),
         label: r.label,
         type: r.type,
       })

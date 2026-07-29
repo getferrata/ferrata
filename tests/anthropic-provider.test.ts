@@ -108,3 +108,21 @@ describe("a model that refuses temperature", () => {
     expect(out.usage).toEqual({ tokensIn: 10, tokensOut: 5 });
   });
 });
+
+describe("truncation signal", () => {
+  it("marks a completion truncated when the model hit the token cap", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ ...OK, stop_reason: "max_tokens" }),
+    );
+    const out = await new AnthropicProvider().complete(req, "claude-sonnet-5");
+    expect(out.truncated).toBe(true);
+  });
+
+  it("is not truncated on a normal stop", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ ...OK, stop_reason: "end_turn" }),
+    );
+    const out = await new AnthropicProvider().complete(req, "claude-sonnet-5");
+    expect(out.truncated).toBe(false);
+  });
+});

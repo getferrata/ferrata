@@ -1,6 +1,14 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  sqliteTable,
+  text,
+  real,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import type { ContextiaMode } from "@/lib/sources/dlp";
+import type { GradedBy } from "@/lib/review/grade";
 
 /**
  * Schema of record for Ferrata: the core course/module/question model plus
@@ -25,6 +33,10 @@ export type CourseStatus =
   | "graphing"
   | "triaging"
   | "generating"
+  // Modules are all written; the study plan and glossary are still being made.
+  // Without its own state the progress screen sat at 100% under the label
+  // "writing module N of N" for as long as those two calls took.
+  | "finishing"
   | "ready"
   | "failed";
 export type ModuleKind = "concept" | "method" | "meta";
@@ -45,6 +57,12 @@ export type UserRole = "student" | "examiner";
 // How deep the explanations go, chosen at creation. Named presets, not a raw
 // number, because depth can't be calibrated precisely.
 export type DepthPreset = "overview" | "operational" | "scratch";
+// What the course's tests are for. "practice" is learning: students grade
+// themselves and the dashboard says so. "assessed" is measurement: only answers
+// the system or the model checked count, over the questions they can check.
+// A difficulty slider was considered and rejected: the model cannot calibrate
+// difficulty verifiably, so the knob would sell a promise nothing keeps.
+export type AssessmentMode = "practice" | "assessed";
 
 // --- courses ----------------------------------------------------------------
 
@@ -89,6 +107,12 @@ export const courses = sqliteTable("courses", {
   // answers arrive later and must be scanned the same way the material was.
   // Null means "whatever the operator's floor is".
   contextiaMode: text("contextia_mode").$type<ContextiaMode>(),
+  // Whether readiness figures are practice (self-graded counts) or assessed
+  // (machine-checked answers only). The examiner flips it per course.
+  assessmentMode: text("assessment_mode")
+    .$type<AssessmentMode>()
+    .notNull()
+    .default("practice"),
   createdAt: integer("created_at")
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
@@ -102,14 +126,27 @@ export const users = sqliteTable(
     id: text("id").primaryKey(),
     email: text("email").notNull(),
     name: text("name").notNull(),
-    // scrypt: stored as "salt:derivedKey" hex (see lib/auth/password).
+    // scrypt: "scrypt$<N>$<salt>$<key>" (or legacy "salt:key"); see lib/auth/password.
     passwordHash: text("password_hash").notNull(),
     role: text("role").$type<UserRole>().notNull().default("student"),
+    // The person who set this install up: the first account, and the only one
+    // who can act on other accounts.
+    //
+    // "Examiner" is a role about courses, not about people. Without this, every
+    // examiner could reset every other examiner's password and read the new one
+    // from the response, which is a full account takeover: their courses, and
+    // the provider key in settings. Invites can mint examiners, so that was one
+    // invite away from anyone.
+    isOperator: integer("is_operator", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at")
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
   },
-  (t) => [index("users_email_idx").on(t.email)],
+  // Unique: email is the login key. The app already lower-cases and checks it
+  // inside the registration transaction, but a DB constraint is the backstop.
+  (t) => [uniqueIndex("users_email_unique").on(t.email)],
 );
 
 export const authSessions = sqliteTable(
@@ -290,6 +327,12 @@ export const concepts = sqliteTable(
     topoOrder: integer("topo_order"),
     // Per-concept video annex (decision A): [{ url, title, query }].
     videoRefsJson: text("video_refs_json"),
+    // Set when a concept is retired instead of deleted. Retiring is proposed by
+    // a model reading uploaded material and approved by an author, and deleting
+    // would cascade through modules and questions into `reviews`, taking every
+    // student's history on it. A retired concept leaves the route and the
+    // roster; what people answered about it stays on the record.
+    retiredAt: integer("retired_at"),
   },
   (t) => [index("concepts_course_idx").on(t.courseId)],
 );
@@ -324,6 +367,11 @@ export const modules = sqliteTable(
     evalScore: real("eval_score"),
     evalReportJson: text("eval_report_json"),
     generatedAt: integer("generated_at"),
+    // Set when an author rewrote the body by hand. A course is a thing somebody
+    // puts their name to, so a reader is entitled to know which parts were
+    // written by the pipeline and which by a person who knew better.
+    editedAt: integer("edited_at"),
+    editedBy: text("edited_by"),
   },
   (t) => [index("modules_concept_idx").on(t.conceptId)],
 );
@@ -343,7 +391,17 @@ export const questions = sqliteTable(
     format: text("format").$type<QuestionFormat>().notNull().default("open"),
     // For mcq: serialized { options: string[], correctIndex: number }.
     optionsJson: text("options_json"),
+    // For cloze: serialized [{ accept: string[] }], one entry per blank, each
+    // listing the wordings that count as right. Without it a cloze can only be
+    // self-graded, because expectedAnswer is prose written for a reader.
+    blanksJson: text("blanks_json"),
     misconceptionsJson: text("misconceptions_json"),
+    // Set when a question is superseded (the module was rewritten) instead of
+    // deleted. Deleting it would cascade to `reviews` and destroy every
+    // student's answers, their FSRS state and the sure-and-wrong record for
+    // that concept, silently and with no way back. A rewritten module retires
+    // its old tests; the ledger they belong to stays.
+    retiredAt: integer("retired_at"),
   },
   (t) => [index("questions_concept_idx").on(t.conceptId)],
 );
@@ -360,10 +418,19 @@ export const reviews = sqliteTable(
     answeredAt: integer("answered_at").notNull(),
     correct: integer("correct", { mode: "boolean" }).notNull(),
     confidence: text("confidence").$type<Confidence>().notNull(),
+    // Who decided: the student ("self"), the stored answer ("system"), or a
+    // model reading an explain-back ("model"). An examiner cannot read a
+    // readiness figure without knowing which of the three produced it.
+    gradedBy: text("graded_by").$type<GradedBy>().notNull().default("self"),
     // Which student answered (null for legacy/anonymous single-user reviews).
     userId: text("user_id"),
     // FSRS per-card state: { stability, difficulty, due, reps, lapses }.
     fsrsStateJson: text("fsrs_state_json"),
+    // The question as it read when it was answered. A rewritten module retires
+    // its old questions, so without this the history would point at wording the
+    // student never saw, and an examiner reading back a wrong answer could not
+    // tell what was actually asked.
+    questionPrompt: text("question_prompt"),
   },
   (t) => [
     index("reviews_question_idx").on(t.questionId),
@@ -421,6 +488,40 @@ export const cuts = sqliteTable(
   (t) => [index("cuts_course_idx").on(t.courseId)],
 );
 
+// --- proposals (course updates from new material) ----------------------------
+
+export type ProposalKind = "update_module" | "add_concept" | "retire_concept";
+export type ProposalStatus = "pending" | "approved" | "dismissed";
+
+// A suggested change to a finished course, produced when the author adds new
+// material. Nothing applies itself: the author approves or dismisses each one,
+// because a course that rewrites itself the moment a file lands is a course
+// nobody can put their name to.
+export const proposals = sqliteTable(
+  "proposals",
+  {
+    id: text("id").primaryKey(),
+    courseId: text("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<ProposalKind>().notNull(),
+    // The concept the change targets; null for add_concept.
+    conceptId: text("concept_id"),
+    title: text("title").notNull(),
+    // Why, grounded in the new material, in the course's language.
+    reason: text("reason").notNull(),
+    // add_concept: the full candidate (summary, priority, minutes, depth).
+    payloadJson: text("payload_json"),
+    status: text("status").$type<ProposalStatus>().notNull().default("pending"),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    decidedAt: integer("decided_at"),
+    decidedBy: text("decided_by"),
+  },
+  (t) => [index("proposals_course_idx").on(t.courseId)],
+);
+
 // --- jobs (in-process queue) ------------------------------------------------
 
 export const jobs = sqliteTable(
@@ -467,8 +568,24 @@ export const llmCalls = sqliteTable(
     // costUsd in whole US cents, which is what a credit is. Integer so a
     // balance never drifts the way a running sum of floats does.
     credits: integer("credits").notNull().default(0),
+    // False when the model was not in the price table and the cost above is the
+    // conservative fallback rather than a real rate. A receipt that cannot say
+    // this is a receipt that quietly invents precision it does not have.
+    priceKnown: integer("price_known", { mode: "boolean" })
+      .notNull()
+      .default(true),
     latencyMs: integer("latency_ms").notNull().default(0),
     ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    /**
+     * Why a call was thrown away: the schema rule it broke, the cap it ran
+     * past, or the transport error. Null when it was kept.
+     *
+     * A discarded call is billed like any other, and until this column existed
+     * the ledger could say a third of a course was wasted without saying on
+     * what. "It is paying for calls it throws away" is only actionable with
+     * the reason attached.
+     */
+    error: text("error"),
     createdAt: integer("created_at")
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
@@ -520,6 +637,7 @@ export type Concept = typeof concepts.$inferSelect;
 export type Edge = typeof edges.$inferSelect;
 export type Module = typeof modules.$inferSelect;
 export type Question = typeof questions.$inferSelect;
+export type Proposal = typeof proposals.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
 export type Cut = typeof cuts.$inferSelect;
 export type Job = typeof jobs.$inferSelect;

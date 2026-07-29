@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cappedFormData } from "@/lib/http/body";
 import { db } from "@/db";
 import { courses } from "@/db/schema";
 import { enqueue } from "@/lib/jobs/queue";
@@ -14,6 +15,10 @@ import { isAbsolute } from "node:path";
 export const runtime = "nodejs";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
+const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // whole request, checked before parsing
+const MAX_FILES = 20;
+const MAX_PROMPT_CHARS = 20_000;
+const MAX_STUDY_HOURS = 2000;
 
 /**
  * POST /api/courses. Multipart: the author's prose (`prompt`), optional
@@ -34,15 +39,30 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  const form = await req.formData().catch(() => null);
-  if (!form) {
-    return NextResponse.json({ error: "expected multipart form" }, { status: 400 });
+  // Counted off the stream rather than read from Content-Length: that header is
+  // absent under chunked encoding and unverified when present, so a cap built on
+  // it is skipped by anyone who omits it. This process also serves every
+  // student, so one oversized upload buffered whole takes the install with it.
+  const parsed = await cappedFormData(req, MAX_TOTAL_BYTES);
+  if (!parsed.ok) {
+    return parsed.reason === "too_large"
+      ? NextResponse.json({ error: "upload too large" }, { status: 413 })
+      : NextResponse.json(
+          { error: "expected multipart form" },
+          { status: 400 },
+        );
   }
+  const form = parsed.form;
 
   // A course needs a brief OR material, not necessarily both: with material
   // alone, the interview extracts the goal and audience instead of us
   // inventing them.
-  const prompt = String(form.get("prompt") ?? "").trim();
+  // Capped: the brief is stored in sourcePrompt and from there is interpolated
+  // into every module prompt of the whole build, so an unbounded one is paid for
+  // once per module, not once.
+  const prompt = String(form.get("prompt") ?? "")
+    .trim()
+    .slice(0, MAX_PROMPT_CHARS);
   const hasFiles = form
     .getAll("files")
     .some((f) => f instanceof File && f.size > 0);
@@ -112,8 +132,14 @@ export async function POST(req: Request): Promise<NextResponse> {
       ? prompt
       : "Build an onboarding course from the attached material. Work out the goal and the audience from it, and ask about anything you cannot infer.";
   const deadline = (form.get("deadline") as string | null)?.trim() || null;
+  // Validated, not just parsed: a negative budget made triage cut everything it
+  // could and declare the course unfeasible, and an absurd one sailed through.
   const hoursRaw = (form.get("hours") as string | null)?.trim();
-  const hours = hoursRaw ? Number(hoursRaw) : null;
+  const hoursNum = hoursRaw ? Number(hoursRaw) : NaN;
+  const hours =
+    Number.isFinite(hoursNum) && hoursNum > 0 && hoursNum <= MAX_STUDY_HOURS
+      ? hoursNum
+      : null;
   const level = (form.get("level") as string | null)?.trim() || null;
   const depthRaw = (form.get("depth") as string | null)?.trim();
   const depthPreset =
@@ -149,7 +175,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       ownerId: user.id,
       depthPreset,
       contextiaMode,
-      budgetMinutes: hours && Number.isFinite(hours) ? Math.round(hours * 60) : undefined,
+      budgetMinutes: hours ? Math.round(hours * 60) : undefined,
       status: "interviewing",
     })
     .run();
@@ -157,7 +183,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   saveRestorations(id, scan.restorations);
 
   // Ingest attached material (best-effort; a bad file must not sink creation).
-  const files = form.getAll("files").filter((f): f is File => f instanceof File);
+  const files = form
+    .getAll("files")
+    .filter((f): f is File => f instanceof File)
+    .slice(0, MAX_FILES);
   for (const file of files) {
     if (file.size === 0 || file.size > MAX_FILE_BYTES) continue;
     try {

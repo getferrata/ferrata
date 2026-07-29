@@ -80,11 +80,20 @@ export function deleteCredential(id: string): void {
   db.delete(webCredentials).where(eq(webCredentials.id, id)).run();
 }
 
-/** The credential to use for a URL, if any. Most specific host wins. */
+/**
+ * The credential to use for a URL, if any. Most specific host wins.
+ *
+ * Matches first and decrypts once. Going through `listCredentials` here ran an
+ * AES-GCM open on every stored credential, on every redirect hop, of every
+ * fetch, to then discard all but one: work proportional to how many hosts the
+ * operator has configured, paid on a path that has nothing to do with them.
+ */
 export function getCredentialForUrl(u: URL): WebCredential | null {
   const host = u.hostname.toLowerCase();
-  const all = listCredentials().filter((c) => hostMatches(c.host, host));
-  if (all.length === 0) return null;
-  all.sort((a, b) => b.host.length - a.host.length);
-  return all[0] ?? null;
+  const matches = (db.select().from(webCredentials).all() as WebCredential[])
+    .filter((c) => hostMatches(c.host, host))
+    .sort((a, b) => b.host.length - a.host.length);
+  const best = matches[0];
+  if (!best) return null;
+  return { ...best, secret: openSecret(best.secret) };
 }

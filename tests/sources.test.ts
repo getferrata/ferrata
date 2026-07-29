@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { chunkText } from "@/lib/sources/chunk";
-import { retrieve, type ChunkDoc } from "@/lib/sources/retrieve";
+import {
+  buildIndex,
+  retrieve,
+  retrieveWith,
+  type ChunkDoc,
+} from "@/lib/sources/retrieve";
 
 describe("chunkText", () => {
   it("returns [] for empty input", () => {
@@ -41,5 +46,57 @@ describe("retrieve (BM25)", () => {
 
   it("handles an empty corpus", () => {
     expect(retrieve("qualsiasi", [])).toEqual([]);
+  });
+});
+
+describe("retrieval diversity (MMR)", () => {
+  // Two near-identical passages (the same fact copied across files) plus one
+  // distinct-but-relevant chunk.
+  const docs: ChunkDoc[] = [
+    {
+      sourceId: "a",
+      sourceName: "a.md",
+      ord: 0,
+      text: "BGP announces routes between autonomous systems using eBGP sessions between peers.",
+    },
+    {
+      sourceId: "b",
+      sourceName: "b.md",
+      ord: 1,
+      text: "BGP announces routes between autonomous systems using eBGP sessions among peers.",
+    },
+    {
+      sourceId: "c",
+      sourceName: "c.md",
+      ord: 2,
+      text: "A route reflector cuts the iBGP full mesh so autonomous systems scale cleanly.",
+    },
+  ];
+
+  it("still returns the most relevant chunk first", () => {
+    const r = retrieveWith(buildIndex(docs), "eBGP sessions between peers", 1);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.text).toContain("between peers");
+  });
+
+  it("drops a near-duplicate in favour of coverage", () => {
+    const r = retrieveWith(
+      buildIndex(docs),
+      "BGP autonomous systems eBGP peers",
+      2,
+    );
+    expect(r).toHaveLength(2);
+    const names = r.map((c) => c.sourceName);
+    // The two near-identical passages must not both be returned; the distinct
+    // chunk takes the second slot.
+    expect(names).toContain("c.md");
+    expect(new Set(names).size).toBe(2);
+  });
+
+  it("fills k from duplicates when nothing else is available", () => {
+    const dupOnly: ChunkDoc[] = [docs[0]!, docs[1]!];
+    const r = retrieveWith(buildIndex(dupOnly), "eBGP peers autonomous", 2);
+    // Only two chunks exist and both are near-duplicates: k is still filled.
+    expect(r).toHaveLength(2);
   });
 });

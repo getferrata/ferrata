@@ -126,12 +126,27 @@ export function buildVault(bundle: CourseBundle): Vault {
   return { dirName: slug(course.title) || "corso", files };
 }
 
-/** Write the vault under ./exports/<slug> and return the absolute path. */
+/** Write the vault under the export dir and return the absolute path. */
 export async function writeVault(
   bundle: CourseBundle,
-  baseDir = resolve(process.cwd(), "exports"),
+  baseDir = process.env.FERRATA_EXPORT_DIR
+    ? resolve(process.env.FERRATA_EXPORT_DIR)
+    : resolve(process.cwd(), "exports"),
 ): Promise<{ path: string; fileCount: number }> {
   const vault = buildVault(bundle);
+  // Same guard as the .ferrata.json export: refuse to write if a real protected
+  // value (a hand-edited module could reintroduce one) would leave in clear.
+  // The vault carries ⟨cxt:⟩ tokens, never the values behind them.
+  const leaked = bundle.restorations.filter(
+    (r) => r.value.length > 3 && vault.files.some((f) => f.content.includes(r.value)),
+  );
+  if (leaked.length > 0) {
+    throw new Error(
+      `Export refused: the vault would carry ${leaked.length} protected value(s) in clear (${leaked
+        .map((r) => r.label)
+        .join(", ")}). Nothing was written.`,
+    );
+  }
   const dir = resolve(baseDir, vault.dirName);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });

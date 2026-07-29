@@ -8,21 +8,21 @@ import type { DepthPreset } from "@/db/schema";
 export function intakeDepthGuidance(preset: DepthPreset): string {
   switch (preset) {
     case "overview":
-      return "PROFONDITÀ scelta: Panoramica. Lo studente ha già le basi. Tieni la lista di concetti corta e ad alto livello, taglia con decisione, NON aggiungere concetti-prerequisito di base.";
+      return "DEPTH chosen: Overview. The learner already has the basics. Keep the concept list short and high level, cut decisively, and do NOT add basic prerequisite concepts.";
     case "scratch":
-      return "PROFONDITÀ scelta: Da zero. Lo studente parte quasi da niente. AGGIUNGI come concetti a sé i prerequisiti di base (per BGP, includi anche indirizzamento IP, TCP, basi di routing). Più concetti, più fondamenta.";
+      return "DEPTH chosen: From scratch. The learner starts from almost nothing. ADD the basic prerequisites as concepts of their own (for BGP, include IP addressing, TCP, routing basics). More concepts, more foundations.";
     default:
-      return "PROFONDITÀ scelta: Operativo (default). Profondità standard: concreto e operativo, senza insegnare ogni prerequisito da zero.";
+      return "DEPTH chosen: Operational (default). Standard depth: concrete and operational, without teaching every prerequisite from scratch.";
   }
 }
 
 export function moduleDepthGuidance(preset: DepthPreset): string {
   switch (preset) {
     case "overview":
-      return "Profondità: panoramica. Vai stretto; puoi dare per noti i termini di base.";
+      return "Depth: overview. Keep it tight; you may take the basic terms as known.";
     case "scratch":
-      return "Profondità: da zero. Assumi poco: quando usi un termine di base che lo studente potrebbe non sapere (cos'è un IP, cos'è il TCP), spiegalo in una frase o un breve inciso: scendi di un livello sotto questo concetto.";
+      return "Depth: from scratch. Assume little: when you use a basic term the learner may not know (what an IP is, what TCP is), explain it in a sentence or a short aside, one level below this concept.";
     default:
-      return "Profondità: operativo. Spiega il concetto in modo concreto; assumi un background generale ma non un'expertise profonda.";
+      return "Depth: operational. Explain the concept concretely; assume a general background but not deep expertise.";
   }
 }

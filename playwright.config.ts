@@ -40,6 +40,10 @@ export default defineConfig({
     command: "node e2e/start.mjs",
     url: `${BASE_URL}/login`,
     reuseExistingServer: false,
-    timeout: 180_000,
+    // The harness builds the app and boots fresh mocks + a fresh DB. On a slow
+    // or loaded machine a cold build can take several minutes, so this is
+    // generous: a false "webServer timed out" reads as a code failure when it
+    // is only the box being busy.
+    timeout: 420_000,
   },
 });

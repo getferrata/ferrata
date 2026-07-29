@@ -57,15 +57,45 @@ export default async function InvitePage({
 
   const invite = check.invite;
 
-  // Already signed in. A course invite enrolls them; an account invite has
+  // Already signed in. A course invite offers to enroll them, behind a POST so
+  // a cross-site GET cannot silently enroll a victim; an account invite has
   // nothing to give someone who already has an account.
   const user = await getCurrentUser();
   if (user) {
-    if (invite.courseId) {
-      enrollByInvite(token, user.id);
-      redirect(`/courses/${invite.courseId}`);
+    if (!invite.courseId) redirect("/courses");
+
+    async function accept(formData: FormData) {
+      "use server";
+      const t = String(formData.get("token") ?? "");
+      const me = await getCurrentUser();
+      if (!me) redirect(`/login?invite=${t}`);
+      const courseId = enrollByInvite(t, me.id);
+      redirect(courseId ? `/courses/${courseId}` : "/courses");
     }
-    redirect("/courses");
+
+    return (
+      <main className="mx-auto flex min-h-screen max-w-measure flex-col justify-center px-6 py-16">
+        <FerrataMark className="mb-6 h-12 w-12 text-text" />
+        <p className="text-step--1 uppercase tracking-[0.08em] text-text-muted">
+          You&rsquo;ve been invited
+        </p>
+        <h1 className="mt-2 max-w-measure font-serif text-step-3 leading-tight">
+          {invite.courseTitle ? plainText(invite.courseTitle) : "Join this course"}
+        </h1>
+        <p className="mt-4 max-w-measure text-step-0 text-text-muted">
+          Join it and it will show up in your courses. This link works once.
+        </p>
+        <form action={accept} className="mt-8">
+          <input type="hidden" name="token" value={token} />
+          <button
+            type="submit"
+            className="inline-flex min-h-[44px] items-center rounded bg-accent px-6 font-medium text-accent-contrast transition hover:opacity-90"
+          >
+            Join this course
+          </button>
+        </form>
+      </main>
+    );
   }
 
   const isAuthor = invite.role === "examiner";

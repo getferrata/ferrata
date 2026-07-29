@@ -119,14 +119,14 @@ describe("the estimate learns from what was really spent", () => {
     const id = seedCourse();
     seedModule(id);
     charge(id, 5, 1000);
-    expect(measuredPerModuleUsd()).toBeNull();
+    expect(measuredPerModuleUsd("claude-sonnet-5")).toBeNull();
   });
 
   it("averages over finished modules once there are enough", () => {
     const id = seedCourse();
     for (let i = 0; i < 5; i++) seedModule(id);
     charge(id, 5, 1000);
-    expect(measuredPerModuleUsd()).toBeCloseTo(1, 5);
+    expect(measuredPerModuleUsd("claude-sonnet-5")).toBeCloseTo(1, 5);
   });
 
   it("ignores courses that never finished", () => {
@@ -137,7 +137,22 @@ describe("the estimate learns from what was really spent", () => {
     charge(done, 5, 1000);
     const broken = seedCourse("generating");
     charge(broken, 100, 1000);
-    expect(measuredPerModuleUsd()).toBeCloseTo(1, 5);
+    expect(measuredPerModuleUsd("claude-sonnet-5")).toBeCloseTo(1, 5);
+  });
+
+  it("does not quote an old model's price after the model changed", () => {
+    // The figure the product shows before spending money has to follow the
+    // choice that is about to be made. An average over every course ever built
+    // here is blind to which model built them, so an install with a history of
+    // expensive courses kept quoting that price after the operator switched to
+    // a cheaper one, and the number simply did not move.
+    const id = seedCourse();
+    for (let i = 0; i < 5; i++) seedModule(id);
+    charge(id, 5, 1000);
+    expect(measuredPerModuleUsd("claude-sonnet-5")).toBeCloseTo(1, 5);
+    // Nothing was ever built with this model, so there is nothing measured to
+    // report and the caller falls back to the price table.
+    expect(measuredPerModuleUsd("claude-haiku-4-5-20251001")).toBeNull();
   });
 
   it("uses the measured figure over the built-in one, and says so", () => {

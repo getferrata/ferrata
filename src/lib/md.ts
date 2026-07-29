@@ -39,18 +39,49 @@ const SANITIZE_OPTS: sanitizeHtml.IOptions = {
     table: sanitizeHtml.simpleTransform("table", {
       tabindex: "0",
       role: "region",
-      "aria-label": "tabella",
+      "aria-label": "table",
     }),
     pre: sanitizeHtml.simpleTransform("pre", {
       tabindex: "0",
       role: "region",
-      "aria-label": "blocco di codice",
+      "aria-label": "code block",
     }),
   },
   // Drop the content of anything not allowed (e.g. <script>…</script>).
   disallowedTagsMode: "discard",
   enforceHtmlBoundary: true,
 };
+
+/** Letters and digits only, lowercased: "Runbook-Rilascio_base.md" → "runbookrilasciobase". */
+function citeKey(s: string): string {
+  return s.toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Match a cited name against the course's real source names.
+ *
+ * Models drop or transpose characters in a filename they are copying: a course
+ * cited `runbookrilebasico.md` for a file whose real name was longer. The
+ * citation still points at the right document and a reader cannot tell, so the
+ * pill showed a file that does not exist.
+ *
+ * Exact match first, then the same name ignoring punctuation and extension,
+ * then a unique prefix. Anything else is left as the model wrote it and marked
+ * unverified rather than silently repointed at the wrong document.
+ */
+function resolveCitation(name: string, sources: readonly string[]): string | null {
+  const cited = name.trim();
+  const exact = sources.find((s) => s === cited);
+  if (exact) return exact;
+  const key = citeKey(cited);
+  if (!key) return null;
+  const normalised = sources.filter((s) => citeKey(s) === key);
+  if (normalised.length === 1) return normalised[0]!;
+  const prefixed = sources.filter(
+    (s) => citeKey(s).startsWith(key) || key.startsWith(citeKey(s)),
+  );
+  return prefixed.length === 1 ? prefixed[0]! : null;
+}
 
 /**
  * Grounded modules cite their sources inline as `[fonte: name]` (or
@@ -60,7 +91,7 @@ const SANITIZE_OPTS: sanitizeHtml.IOptions = {
  * The source name is untrusted (LLM output / imported packages), so the sanitize
  * pass below is the real backstop. This only shapes the markup.
  */
-function markCitations(html: string): string {
+function markCitations(html: string, sources: readonly string[] = []): string {
   const CITE = /\[(fonte|source)\s*:\s*([^\]\n]+)\]/gi;
   // Split keeps the <pre>…</pre> delimiters at odd indices, untouched.
   return html
@@ -68,11 +99,17 @@ function markCitations(html: string): string {
     .map((seg, i) =>
       i % 2 === 1
         ? seg
-        : seg.replace(
-            CITE,
-            (_m, kw: string, name: string) =>
-              `<span class="cite">${kw.toLowerCase()}: ${name.trim()}</span>`,
-          ),
+        : seg.replace(CITE, (_m, kw: string, name: string) => {
+            const resolved = sources.length
+              ? resolveCitation(name, sources)
+              : name.trim();
+            if (resolved) {
+              return `<span class="cite">${kw.toLowerCase()}: ${escapeAttr(resolved)}</span>`;
+            }
+            // Named a document this course does not have. Shown, because hiding
+            // it would make a wrong citation look like a right one.
+            return `<span class="cite cite-unknown" title="This document is not among the course's sources">${kw.toLowerCase()}: ${escapeAttr(name.trim())} (?)</span>`;
+          }),
     )
     .join("");
 }
@@ -170,7 +207,7 @@ export interface Restoration {
 const CXT_TOKEN_RE = /[⟨<]\s*cxt:\s*([a-f0-9]{6,16})\s*[⟩>]/g;
 
 function cxtSpan(label: string, value: string): string {
-  return `<span class="cxt" title="${escapeAttr(label)}: protetto dall'AI da Contextia">${escapeAttr(value)}</span>`;
+  return `<span class="cxt" title="${escapeAttr(label)}: kept from the model by Contextia">${escapeAttr(value)}</span>`;
 }
 
 function restoreProtected(html: string, restorations: Restoration[]): string {
@@ -182,16 +219,21 @@ function restoreProtected(html: string, restorations: Restoration[]): string {
   return html.replace(CXT_TOKEN_RE, (raw, hash: string) => {
     const r = byHash.get(hash);
     if (r) return cxtSpan(r.label, r.value);
-    return `<span class="cxt" title="valore protetto da Contextia">&#8226;&#8226;&#8226;</span>`;
+    return `<span class="cxt" title="value protected by Contextia">&#8226;&#8226;&#8226;</span>`;
   });
 }
 
 export function renderMarkdown(
   md: string,
-  opts: { glossary?: GlossaryTerm[]; restorations?: Restoration[] } = {},
+  opts: {
+    glossary?: GlossaryTerm[];
+    restorations?: Restoration[];
+    /** Names of the course's sources, so a cited one can be checked. */
+    sources?: readonly string[];
+  } = {},
 ): string {
   const rawHtml = marked.parse(md, { async: false });
-  const withCites = markCitations(rawHtml);
+  const withCites = markCitations(rawHtml, opts.sources ?? []);
   const linked = opts.glossary?.length
     ? linkGlossaryTerms(withCites, opts.glossary)
     : withCites;

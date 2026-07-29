@@ -1,4 +1,4 @@
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   concepts as conceptsT,
@@ -43,7 +43,12 @@ export function listCourses(viewer?: Viewer): CourseSummary[] {
   const conceptRows = db
     .select({ id: conceptsT.id, courseId: conceptsT.courseId })
     .from(conceptsT)
-    .where(inArray(conceptsT.courseId, courseIds))
+    .where(
+      and(
+        inArray(conceptsT.courseId, courseIds),
+        isNull(conceptsT.retiredAt),
+      ),
+    )
     .all();
   const conceptIds = conceptRows.map((c) => c.id);
   const conceptToCourse = new Map(conceptRows.map((c) => [c.id, c.courseId]));
@@ -59,7 +64,12 @@ export function listCourses(viewer?: Viewer): CourseSummary[] {
     ? db
         .select({ id: questionsT.id, conceptId: questionsT.conceptId })
         .from(questionsT)
-        .where(inArray(questionsT.conceptId, conceptIds))
+        .where(
+          and(
+            inArray(questionsT.conceptId, conceptIds),
+            isNull(questionsT.retiredAt),
+          ),
+        )
         .all()
     : [];
   const questionIds = questionRows.map((q) => q.id);

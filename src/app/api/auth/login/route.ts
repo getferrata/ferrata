@@ -28,9 +28,15 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const email = parsed.data.email.trim().toLowerCase();
 
-  // Throttle the email and the caller separately: a spoofed forwarded header
-  // rotates one key, never both.
-  const keys = [`login:email:${email}`, `login:ip:${clientKey(req)}`];
+  // The email is always throttled: it is the thing being guessed, and the
+  // attacker cannot rotate it. The caller address is added only when there is a
+  // trustworthy one (see clientKey); keying every caller under one name would
+  // let eight failures from anywhere refuse everybody.
+  const ip = clientKey(req);
+  const keys = [
+    `login:email:${email}`,
+    ...(ip ? [`login:ip:${ip}`] : []),
+  ];
   for (const key of keys) {
     const verdict = checkThrottle(key);
     if (!verdict.allowed) {
@@ -43,7 +49,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const user = db.select().from(users).where(eq(users.email, email)).get();
   // Same generic error whether the email exists or the password is wrong.
-  if (!user || !verifyPassword(parsed.data.password, user.passwordHash)) {
+  if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
     for (const key of keys) recordFailure(key);
     return NextResponse.json(
       { error: "Incorrect email or password." },

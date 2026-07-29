@@ -6,7 +6,7 @@
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db, schema } from "./index";
-import type { BloomLevel } from "./schema";
+import type { BloomLevel, QuestionFormat } from "./schema";
 
 const COURSE_ID = "course_demo_acme";
 
@@ -20,6 +20,10 @@ interface DemoQuestion {
   prompt: string;
   expected: string;
   bloom: BloomLevel;
+  /** Defaults to a self-graded open question when omitted. */
+  format?: QuestionFormat;
+  options?: { options: string[]; correctIndex: number };
+  blanks?: { accept: string[] }[];
 }
 interface DemoModule {
   title: string;
@@ -69,6 +73,25 @@ const MODULES: DemoModule[] = [
         expected:
           "The edge gateway: it is the single front door, so if it is down everything looks down even when the backends are healthy.",
         bloom: "understand",
+      },
+      // Graded by the system, not by the reader: the demo course is what a
+      // fresh install shows, so it has to show what the product actually does.
+      {
+        prompt: "Which service terminates inbound TLS?",
+        expected: "The edge gateway: it is the single front door.",
+        bloom: "remember",
+        format: "mcq",
+        options: {
+          options: ["The API service", "The edge gateway", "Postgres"],
+          correctIndex: 1,
+        },
+      },
+      {
+        prompt: "A 503 at the edge means the backend pool is ___ .",
+        expected: "empty: no healthy backend is left to route to.",
+        bloom: "remember",
+        format: "cloze",
+        blanks: [{ accept: ["empty", "vuoto"] }],
       },
     ],
   },
@@ -206,7 +229,9 @@ function seed(): void {
             prompt: q.prompt,
             expectedAnswer: q.expected,
             bloomLevel: q.bloom,
-            format: "open",
+            format: q.format ?? "open",
+            optionsJson: q.options ? JSON.stringify(q.options) : null,
+            blanksJson: q.blanks ? JSON.stringify(q.blanks) : null,
             misconceptionsJson: JSON.stringify([]),
           })
           .run();

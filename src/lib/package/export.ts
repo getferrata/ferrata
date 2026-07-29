@@ -67,7 +67,11 @@ export interface ExportResult {
 export async function writePackage(
   bundle: CourseBundle,
   opts: { author?: string | null; license?: string | null } = {},
-  baseDir = resolve(process.cwd(), "exports"),
+  // In Docker the working directory is the app dir, so default exports landed
+  // inside the image. FERRATA_EXPORT_DIR lets an operator point them at a mount.
+  baseDir = process.env.FERRATA_EXPORT_DIR
+    ? resolve(process.env.FERRATA_EXPORT_DIR)
+    : resolve(process.cwd(), "exports"),
 ): Promise<ExportResult> {
   const pkg = buildPackage(bundle, {
     author: opts.author ?? null,

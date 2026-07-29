@@ -59,7 +59,53 @@ test.describe("student journey", () => {
     await first.getByRole("button", { name: "Sure" }).first().click();
     await first.getByRole("button", { name: "Show the answer" }).click();
     await first.getByRole("button", { name: "I had it" }).click();
-    await expect(first.getByText("Recorded.")).toBeVisible();
+    await expect(first.getByText("Right.")).toBeVisible();
+  });
+
+  test("a multiple choice is answered, and the server decides", async ({
+    page,
+  }) => {
+    await page.goto(`/courses/${COURSE}`);
+    await page.getByText("Resume where you left off").click();
+
+    const anchors = page.getByLabel("Anchors");
+    const mcq = anchors
+      .locator("li")
+      .filter({ hasText: "Which service terminates inbound TLS?" });
+    await mcq.scrollIntoViewIfNeeded();
+
+    // The options are shown, which is the whole point: they were being
+    // generated and then hidden behind a self-graded reveal.
+    await expect(mcq.getByRole("radio")).toHaveCount(3);
+
+    // exact: "Sure" is a substring of "Fairly sure".
+    await mcq.getByRole("button", { name: "Sure", exact: true }).click();
+    await mcq.getByRole("radio", { name: "Postgres" }).check();
+    await mcq.getByRole("button", { name: "Answer" }).click();
+
+    // No "I had it" button: the student does not get to grade this one, and
+    // the wrong choice they made with high confidence is what gets recorded.
+    await expect(mcq.getByText(/Sure and wrong/)).toBeVisible();
+    await expect(mcq.getByRole("button", { name: "I had it" })).toHaveCount(0);
+  });
+
+  test("a cloze with stored answers is typed, not self-graded", async ({
+    page,
+  }) => {
+    await page.goto(`/courses/${COURSE}`);
+    await page.getByText("Resume where you left off").click();
+
+    const anchors = page.getByLabel("Anchors");
+    const cloze = anchors
+      .locator("li")
+      .filter({ hasText: "the backend pool is" });
+    await cloze.scrollIntoViewIfNeeded();
+
+    await cloze.getByRole("button", { name: "Fairly sure" }).click();
+    // Case and stray punctuation must not decide whether somebody knows this.
+    await cloze.getByRole("textbox", { name: "Blank 1" }).fill("  EMPTY. ");
+    await cloze.getByRole("button", { name: "Answer" }).click();
+    await expect(cloze.getByText("Right.")).toBeVisible();
   });
 
   test("dashboard shows honest readiness, not a completion bar", async ({
@@ -113,5 +159,49 @@ test.describe("examiner view", () => {
     }
     await page.reload();
     await expect(page.getByText(STUDENT.email).first()).toBeVisible();
+  });
+});
+
+test.describe("an author fixing their own course", () => {
+  test.use({ storageState: "e2e/.artifacts/examiner.json" });
+
+  test("edits a module by hand, and the change is what students read", async ({
+    page,
+  }) => {
+    await page.goto(`/courses/${COURSE}`);
+    await page.getByRole("link", { name: /The edge gateway/ }).first().click();
+
+    const marker = `Checked against the runbook on ${Date.now()}.`;
+    await page.getByRole("button", { name: "Edit this module" }).click();
+    const box = page.getByLabel("Module source (markdown)");
+    await box.fill(`${await box.inputValue()}\n\n${marker}`);
+    await page.getByRole("button", { name: "Save" }).click();
+
+    // Back to the rendered article, through the normal pipeline.
+    await expect(page.getByText(marker)).toBeVisible();
+    await expect(page.getByText(/Edited by hand on/)).toBeVisible();
+  });
+});
+
+test.describe("a student cannot rewrite the course", () => {
+  test.use({ storageState: "e2e/.artifacts/student.json" });
+
+  test("has no edit control, and the endpoint refuses them", async ({
+    page,
+    request,
+  }) => {
+    await page.goto(`/courses/${COURSE}`);
+    await page.getByRole("link", { name: /The edge gateway/ }).first().click();
+    await expect(
+      page.getByRole("button", { name: "Edit this module" }),
+    ).toHaveCount(0);
+
+    // Not just hidden: the endpoint itself says no.
+    const moduleId = page.url().split("/m/")[1]!;
+    const res = await request.patch(
+      `/api/courses/${COURSE}/modules/${moduleId}`,
+      { data: { bodyMd: "owned" } },
+    );
+    expect(res.status()).toBe(403);
   });
 });

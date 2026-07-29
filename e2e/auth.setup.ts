@@ -1,5 +1,5 @@
 import { test as setup, expect } from "@playwright/test";
-import { EXAMINER, STUDENT } from "./personas";
+import { EXAMINER, STUDENT, STUDENT2 } from "./personas";
 
 /**
  * Creates the two personas every journey needs and saves their sessions.
@@ -38,4 +38,26 @@ setup("register student", async ({ request }) => {
   const body = (await res.json()) as { role: string };
   expect(body.role).toBe("student");
   await request.storageState({ path: "e2e/.artifacts/student.json" });
+});
+
+setup("register second student", async ({ request }) => {
+  // A second student, for the isolation checks: same flow, its own invite.
+  const login = await request.post("/api/auth/login", {
+    data: { email: EXAMINER.email, password: EXAMINER.password },
+  });
+  expect(login.ok()).toBe(true);
+
+  const minted = await request.post("/api/invites", {
+    data: { role: "student" },
+  });
+  expect(minted.status()).toBe(201);
+  const { token } = (await minted.json()) as { token: string };
+
+  const res = await request.post("/api/auth/register", {
+    data: { ...STUDENT2, invite: token },
+  });
+  expect(res.status()).toBe(201);
+  const body = (await res.json()) as { role: string };
+  expect(body.role).toBe("student");
+  await request.storageState({ path: "e2e/.artifacts/student2.json" });
 });

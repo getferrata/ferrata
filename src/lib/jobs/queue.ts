@@ -1,4 +1,4 @@
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, like, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { jobs, type Job } from "@/db/schema";
 import { newId, now } from "@/lib/util/id";
@@ -31,6 +31,57 @@ export function enqueue(
     })
     .run();
   return id;
+}
+
+/**
+ * Queue a module rewrite unless one for the same concept is already queued or
+ * running. Returns true if it enqueued, false if it deduplicated.
+ *
+ * The worker is a single lane, so the same concept reaching here twice, from a
+ * double click or from the manual button and an approved proposal at once,
+ * would run the whole quality loop twice: billed twice, and the second run
+ * deletes the questions the first just wrote. One guard, used by both callers.
+ */
+export function enqueueRegenerateModuleOnce(
+  courseId: string,
+  conceptId: string,
+  actorUserId: string | null,
+): boolean {
+  const inFlight = db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.type, "regenerate_module"),
+        inArray(jobs.status, ["queued", "running"]),
+        like(jobs.payloadJson, `%"${conceptId}"%`),
+      ),
+    )
+    .get();
+  if (inFlight) return false;
+  enqueue("regenerate_module", { courseId, conceptId, actorUserId });
+  return true;
+}
+
+/**
+ * True while a rewrite for this concept's module is queued or running. The
+ * module page reads it to show a live "rewriting" banner instead of a stale
+ * snapshot, and to keep polling until the swap lands.
+ */
+export function moduleRewriteInFlight(conceptId: string): boolean {
+  return Boolean(
+    db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.type, "regenerate_module"),
+          inArray(jobs.status, ["queued", "running"]),
+          like(jobs.payloadJson, `%"${conceptId}"%`),
+        ),
+      )
+      .get(),
+  );
 }
 
 /** Atomically claim the next runnable job, marking it running. */

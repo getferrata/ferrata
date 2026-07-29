@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<string, string> = {
   graphing: "generating",
   triaging: "generating",
   generating: "writing the modules",
+  finishing: "writing the study plan",
   ready: "ready",
   failed: "failed",
 };

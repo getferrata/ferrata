@@ -14,8 +14,6 @@ onlyBuiltDependencies:
   - better-sqlite3
   - esbuild
   - sharp
-patchedDependencies:
-  '@sbr0nch/contextia-engine@2.0.2': patches/@sbr0nch__contextia-engine@2.0.2.patch
 
 # Pinned past known advisories: the vulnerable copies of both arrive
 # transitively, so a direct dependency is not enough to keep them out.

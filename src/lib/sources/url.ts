@@ -1,7 +1,9 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { Agent } from "undici";
 import sanitizeHtml from "sanitize-html";
 import { getCredentialForUrl } from "./credentials";
+import { readCapped } from "@/lib/http/body";
 
 /**
  * Ingest a web page as course material: paste a link (a wiki page, a doc site)
@@ -21,6 +23,7 @@ import { getCredentialForUrl } from "./credentials";
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_BYTES = 3 * 1024 * 1024;
 const MIN_TEXT = 200; // below this, treat as empty / login wall
+const MAX_REDIRECTS = 4;
 
 export type UrlErrorKind =
   | "invalid"
@@ -73,7 +76,24 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 /** Parse + SSRF-guard a URL. Resolves the host and refuses internal addresses. */
-export async function assertPublicUrl(raw: string): Promise<URL> {
+/**
+ * A validated URL, plus the address it resolved to at validation time.
+ *
+ * The address is carried out so the connection can be pinned to it. Validating
+ * a hostname and then handing the hostname to fetch resolves it a second time,
+ * independently, and a hostile DNS server with a zero TTL can answer differently
+ * the second time: public to pass the check, internal to be fetched. Pinning
+ * removes the second lookup, so there is nothing left to change in between.
+ *
+ * `address` is null when there is nothing to pin: the caller disabled the guard
+ * for a private network, or the URL already names an IP literal.
+ */
+export interface CheckedUrl {
+  url: URL;
+  address: string | null;
+}
+
+export async function assertPublicUrl(raw: string): Promise<CheckedUrl> {
   let u: URL;
   try {
     u = new URL(raw.trim());
@@ -83,14 +103,14 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   if (u.protocol !== "http:" && u.protocol !== "https:") {
     throw new UrlError("only http(s) links are allowed", "invalid");
   }
-  if (allowPrivate()) return u;
+  if (allowPrivate()) return { url: u, address: null };
   const host = u.hostname.replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost")) {
     throw new UrlError("blocked: internal address", "private");
   }
   if (isIP(host)) {
     if (isPrivateIp(host)) throw new UrlError("blocked: internal address", "private");
-    return u;
+    return { url: u, address: null };
   }
   let addrs: { address: string }[];
   try {
@@ -101,7 +121,25 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   if (addrs.length === 0 || addrs.some((a) => isPrivateIp(a.address))) {
     throw new UrlError("blocked: resolves to an internal address", "private");
   }
-  return u;
+  // Every answer was public, so any of them is safe to pin to.
+  return { url: u, address: addrs[0]!.address };
+}
+
+/**
+ * A dispatcher that connects to one specific address, whatever DNS says now.
+ *
+ * Built per request rather than cached: the address is only valid for the URL
+ * that was just checked, and reusing one across hosts would send a request to
+ * the wrong machine.
+ */
+function pinnedAgent(address: string): Agent {
+  return new Agent({
+    connect: {
+      lookup: (_hostname, _options, callback) => {
+        callback(null, address, isIP(address));
+      },
+    },
+  });
 }
 
 /** Strip a page to readable text: drop non-content regions, then remove markup. */
@@ -169,8 +207,11 @@ interface RawFetch {
 /** Fetch with SSRF checks, timeout, size cap, and stored credentials. */
 async function fetchRaw(raw: string): Promise<RawFetch> {
   let u: URL;
+  let pinned: string | null;
   try {
-    u = await assertPublicUrl(raw);
+    const checked = await assertPublicUrl(raw);
+    u = checked.url;
+    pinned = checked.address;
   } catch (e) {
     const kind = e instanceof UrlError ? e.kind : "invalid";
     return {
@@ -180,50 +221,83 @@ async function fetchRaw(raw: string): Promise<RawFetch> {
     };
   }
 
-  const headers: Record<string, string> = {
-    "user-agent": "FerrataBot/1.0 (+onboarding knowledge import)",
-    accept: "text/html,text/plain,application/xhtml+xml,*/*",
-  };
-  // Attach stored credentials for this host. Never over plain http to a
-  // public host: that would leak the secret on the wire.
-  const cred = getCredentialForUrl(u);
-  if (cred) {
-    if (u.protocol === "https:" || allowPrivate()) {
-      headers.authorization =
-        cred.kind === "basic"
-          ? `Basic ${Buffer.from(`${cred.username ?? ""}:${cred.secret}`).toString("base64")}`
-          : `Bearer ${cred.secret}`;
-    }
-  }
-
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(u, {
-      redirect: "follow",
-      signal: ctrl.signal,
-      headers,
-    });
-    try {
-      await assertPublicUrl(res.url);
-    } catch {
+    // Redirects are followed by hand so every hop is SSRF-checked BEFORE it is
+    // fetched: `redirect: "follow"` would let the browser chase a Location into
+    // an internal address before any of our code runs. Credentials are rebuilt
+    // per hop, so a redirect to another host never carries this host's secret.
+    for (let hop = 0; ; hop++) {
+      const headers: Record<string, string> = {
+        "user-agent": "FerrataBot/1.0 (+onboarding knowledge import)",
+        accept: "text/html,text/plain,application/xhtml+xml,*/*",
+      };
+      const cred = getCredentialForUrl(u);
+      if (cred && (u.protocol === "https:" || allowPrivate())) {
+        headers.authorization =
+          cred.kind === "basic"
+            ? `Basic ${Buffer.from(`${cred.username ?? ""}:${cred.secret}`).toString("base64")}`
+            : `Bearer ${cred.secret}`;
+      }
+
+      // Connect to the address the guard checked, instead of resolving the
+      // hostname a second time. TLS still validates against the hostname, so a
+      // pinned connection is not a weakened one; it just cannot be pointed
+      // somewhere else between the check and the connection.
+      const res = await fetch(u, {
+        redirect: "manual",
+        signal: ctrl.signal,
+        headers,
+        ...(pinned ? { dispatcher: pinnedAgent(pinned) } : {}),
+      } as RequestInit);
+
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc) break; // a redirect with no target: treat as the final response
+        if (hop >= MAX_REDIRECTS) {
+          return { ok: false, error: "too many redirects", errorKind: "http" };
+        }
+        let next: CheckedUrl;
+        try {
+          next = await assertPublicUrl(new URL(loc, u).toString());
+        } catch (e) {
+          const kind = e instanceof UrlError ? e.kind : "invalid";
+          return {
+            ok: false,
+            error:
+              kind === "private"
+                ? "blocked: redirected to an internal address"
+                : "blocked: bad redirect target",
+            errorKind: kind,
+          };
+        }
+        u = next.url;
+        pinned = next.address;
+        continue;
+      }
+
+      // Not a redirect: read the body with a running size cap, so a huge or
+      // endless response is aborted instead of buffered whole into memory.
+      const declared = Number(res.headers.get("content-length") ?? "");
+      if (Number.isFinite(declared) && declared > MAX_BYTES) {
+        await res.body?.cancel().catch(() => {});
+        return { ok: false, error: "page too large", errorKind: "too-large" };
+      }
+      const capped = await readCapped(res.body, MAX_BYTES);
+      if (capped === null) {
+        ctrl.abort();
+        return { ok: false, error: "page too large", errorKind: "too-large" };
+      }
       return {
-        ok: false,
-        error: "blocked: redirected to an internal address",
-        errorKind: "private",
+        ok: res.ok,
+        status: res.status,
+        finalUrl: u.toString(),
+        contentType: res.headers.get("content-type") ?? "",
+        body: capped.toString("utf8"),
       };
     }
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_BYTES) {
-      return { ok: false, error: "page too large", errorKind: "too-large" };
-    }
-    return {
-      ok: res.ok,
-      status: res.status,
-      finalUrl: res.url,
-      contentType: res.headers.get("content-type") ?? "",
-      body: buf.toString("utf8"),
-    };
+    return { ok: false, error: "no response", errorKind: "unreachable" };
   } catch (e) {
     const aborted = e instanceof Error && e.name === "AbortError";
     return {
@@ -366,7 +440,7 @@ export async function expandSeeds(
     if (out.length >= cap) break;
     let base: URL;
     try {
-      base = await assertPublicUrl(seed);
+      base = (await assertPublicUrl(seed)).url;
     } catch {
       continue; // the seed itself will fail honestly at ingest time
     }

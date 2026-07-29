@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { courses, users } from "@/db/schema";
+import { courses, enrollments, users } from "@/db/schema";
 import { requireExaminer } from "@/lib/auth/session";
 import { getDashboard } from "@/lib/course/dashboard";
 import { SiteHeader } from "@/components/site-header";
@@ -35,6 +35,17 @@ export default async function StudentDrilldown({
 
   const student = db.select().from(users).where(eq(users.id, userId)).get();
   if (!student) notFound();
+  // On this course, specifically. Without this the page renders for any user id
+  // on the install, showing their name and email to an examiner who was never
+  // given them: an empty readiness report doubles as a directory.
+  const enrolled = db
+    .select({ id: enrollments.id })
+    .from(enrollments)
+    .where(
+      and(eq(enrollments.courseId, courseId), eq(enrollments.userId, userId)),
+    )
+    .get();
+  if (!enrolled) notFound();
 
   const d = getDashboard(courseId, new Date(), userId);
   if (!d) notFound();

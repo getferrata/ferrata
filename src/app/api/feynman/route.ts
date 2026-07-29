@@ -6,9 +6,17 @@ import { runFeynman } from "@/lib/llm/tasks/feynman";
 import { getCurrentUser } from "@/lib/auth/session";
 import { canSeeCourse } from "@/lib/course/access";
 import { withActor } from "@/lib/llm/actor";
+import { hitRateLimit } from "@/lib/auth/throttle";
 import { newId, now } from "@/lib/util/id";
 
 export const runtime = "nodejs";
+
+// Explain-back grading is the one paid call a student can trigger. Cap it per
+// user: generous for real study, but a hard ceiling on scripted or concurrent
+// abuse of the owner's key, independent of whether a credit limit is set.
+const FEYNMAN_LIMIT = 20;
+const FEYNMAN_WINDOW_MS = 5 * 60 * 1000;
+const MAX_EXPLANATION_CHARS = 4000;
 
 interface Body {
   conceptId?: unknown;
@@ -23,6 +31,19 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!user) {
     return NextResponse.json({ error: "not authenticated" }, { status: 401 });
   }
+  // Checked before any work, and synchronously, so a burst of parallel requests
+  // is counted before any of them reaches the paid call.
+  const rl = hitRateLimit(
+    `feynman:${user.id}`,
+    FEYNMAN_LIMIT,
+    FEYNMAN_WINDOW_MS,
+  );
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many explain-backs in a short time. Take a breather." },
+      { status: 429, headers: { "retry-after": String(rl.retryAfterSec) } },
+    );
+  }
   const body = (await req.json().catch(() => ({}))) as Body;
   const conceptId = typeof body.conceptId === "string" ? body.conceptId : "";
   const explanation =
@@ -31,6 +52,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json(
       { error: "conceptId and a real explanation are required" },
       { status: 400 },
+    );
+  }
+  // The rate limit bounds how often a student can spend the install's key on
+  // this; without a size bound it says nothing about how much. An explanation
+  // worth grading is a few paragraphs, so a ceiling here costs nobody anything
+  // real and stops one student turning ten allowed calls into a million tokens.
+  if (explanation.length > MAX_EXPLANATION_CHARS) {
+    return NextResponse.json(
+      {
+        error: `Keep the explanation under ${MAX_EXPLANATION_CHARS} characters: explaining it back is meant to be short.`,
+      },
+      { status: 413 },
     );
   }
 

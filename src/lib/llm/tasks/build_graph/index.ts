@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runStructuredTask } from "@/lib/llm/run";
+import { OUTPUT_CAPS } from "@/lib/llm/tasks/caps";
 import { graphSchema, type GraphResult } from "./schema";
 
 const PROMPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "prompt.md");
@@ -36,7 +37,7 @@ export async function runBuildGraph(
     schema: graphSchema,
     courseId,
     temperature: 0.2,
-    maxTokens: 3000,
+    maxTokens: OUTPUT_CAPS.build_graph,
   });
 }
 

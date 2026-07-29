@@ -96,6 +96,10 @@ export class CreditLimitError extends Error {
  * reservation would leak every time a process died mid-request.
  */
 export function assertWithinLimit(userId: string | null): void {
+  // No actor means an operator-run seed script, not a request: those run
+  // uncapped by design. Every request and every job carries a real actor, and
+  // the one user-triggered spend path (explain-back) is rate limited at the
+  // route, so this stays a seam for tooling, not a hole an attacker can reach.
   if (!userId) return;
   const limit = creditLimit();
   if (limit === null) return;

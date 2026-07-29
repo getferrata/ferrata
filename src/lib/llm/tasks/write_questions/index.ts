@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { runStructuredTask } from "@/lib/llm/run";
+import { OUTPUT_CAPS } from "@/lib/llm/tasks/caps";
+import { moduleBodyMessage } from "@/lib/llm/material";
 import { questionsSchema, type QuestionsResult } from "./schema";
 
 const PROMPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "prompt.md");
@@ -26,15 +28,15 @@ export async function runWriteQuestions(
     vars: {
       lang: args.lang,
       conceptTitle: args.conceptTitle,
-      bodyMd: args.bodyMd,
       depthLevel: String(args.depthLevel),
       sourcePrompt: args.sourcePrompt,
       count: String(args.count),
     },
+    extraMessages: [moduleBodyMessage(args.bodyMd)],
     schema: questionsSchema,
     courseId,
     temperature: 0.5,
-    maxTokens: 3500,
+    maxTokens: OUTPUT_CAPS.write_questions,
   });
 }
 

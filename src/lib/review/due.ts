@@ -1,10 +1,11 @@
-import { inArray, eq, asc, and } from "drizzle-orm";
+import { inArray, eq, asc, and, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   concepts as conceptsT,
   questions as questionsT,
   reviews as reviewsT,
 } from "@/db/schema";
+import type { QuestionFormat } from "@/db/schema";
 import type { StoredCard } from "@/lib/fsrs";
 import { plainText } from "@/lib/text";
 
@@ -14,6 +15,11 @@ export interface DueQuestion {
   conceptTitle: string;
   prompt: string;
   expectedAnswer: string;
+  /** Carried through so a review session can answer a card, not just reveal it. */
+  bloomLevel: string;
+  format: QuestionFormat;
+  optionsJson: string | null;
+  blanksJson: string | null;
   isNew: boolean;
   sureWrong: boolean;
   dueAt: number | null;
@@ -69,15 +75,24 @@ function loadQuestions(courseId: string) {
   const cs = db
     .select({ id: conceptsT.id, title: conceptsT.title })
     .from(conceptsT)
-    .where(eq(conceptsT.courseId, courseId))
+    .where(
+      and(eq(conceptsT.courseId, courseId), isNull(conceptsT.retiredAt)),
+    )
     .all();
   const titleById = new Map(cs.map((c) => [c.id, plainText(c.title)]));
   const conceptIds = cs.map((c) => c.id);
+  // Retired questions belong to a module that was rewritten: their answers stay
+  // on the record, but nobody is scheduled to study them again.
   const qs = conceptIds.length
     ? db
         .select()
         .from(questionsT)
-        .where(inArray(questionsT.conceptId, conceptIds))
+        .where(
+          and(
+            inArray(questionsT.conceptId, conceptIds),
+            isNull(questionsT.retiredAt),
+          ),
+        )
         .all()
     : [];
   return { qs, titleById };
@@ -140,6 +155,10 @@ export function getDueSession(
         conceptTitle: titleById.get(q.conceptId) ?? "",
         prompt: q.prompt,
         expectedAnswer: q.expectedAnswer,
+        bloomLevel: q.bloomLevel,
+        format: q.format,
+        optionsJson: q.optionsJson,
+        blanksJson: q.blanksJson,
         isNew,
         sureWrong,
         dueAt,

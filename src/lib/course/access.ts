@@ -25,7 +25,10 @@ export function canSeeCourse(courseId: string, viewer: Viewer): boolean {
     .get();
   if (!course) return false;
   if (!course.ownerId) return true;
-  if (viewer.role === "examiner") return course.ownerId === viewer.userId;
+  // Owning the course settles it. Not owning it does not settle the opposite:
+  // an examiner can also be assigned somebody else's course as a student, and
+  // returning false here locked them out of material they were given.
+  if (viewer.role === "examiner" && course.ownerId === viewer.userId) return true;
   return Boolean(
     db
       .select({ id: enrollments.id })

@@ -6,17 +6,36 @@ import { estimateCostUsd } from "./cost";
  * informed. Never billed, and never precise.
  *
  * A module is not one call. Each one is written, put through a separate
- * concreteness pass, judged, and given its tests, and the first three repeat
- * when the judge is not satisfied: four to eight calls, not one. The earlier
- * figures here were a single write and came out about three times under, on the
- * number the product uses as its headline promise.
+ * concreteness pass, judged, and given its tests: four calls at least, and the
+ * whole group repeats when the judge is not satisfied.
  *
- * These constants are the fallback for a fresh install with no history. Once an
- * install has finished a few courses the estimate uses its own measured average
- * instead, which reflects the model and the depth actually in use.
+ * The figures below come from a finished course against a hosted model, over a
+ * repository of 131 files: fourteen modules, and every stage of the pipeline
+ * including the two that only run at the end.
+ *
+ * They count **only the calls that were kept**. Two thirds of what that run
+ * billed went on calls that were discarded, and pricing a course as if that
+ * still happened would quote the bill of a bug that has been fixed. On the same
+ * arithmetic, a mid-run reading taken while the waste was still in the numbers
+ * put this 20 per cent too high.
+ *
+ * What they are not:
+ *
+ * - Exact for the pipeline as it stands now. That run gave a single test to
+ *   every deep module because the test writer kept running past its ceiling, so
+ *   the questions those modules should have had are not in this figure; against
+ *   that, the concreteness pass no longer pays a JSON escaping tax. The two
+ *   roughly cancel, and the next finished course is what settles it.
+ * - A promise for a different shape of course. The grounding excerpts ride in
+ *   every module call, so a course built from a brief alone costs materially
+ *   less than one built from a repository, and this is the expensive side.
+ *
+ * They are the fallback for a fresh install with no history. Once an install has
+ * finished a few courses the estimate uses its own measured average instead,
+ * which reflects the model, the depth and the kind of material actually in use.
  */
-const BASE_TOKENS = { in: 12_000, out: 3_000 };
-const PER_MODULE_TOKENS = { in: 34_000, out: 12_000 };
+const BASE_TOKENS = { in: 12_000, out: 10_000 };
+const PER_MODULE_TOKENS = { in: 34_000, out: 13_000 };
 
 export interface CourseCostEstimate {
   baseUsd: number;

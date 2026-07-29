@@ -63,7 +63,7 @@ export async function llmSetupStatus(): Promise<SetupStatus> {
     cost: estimateCourseCost(
       plan.providerName,
       plan.model,
-      measuredPerModuleUsd(),
+      measuredPerModuleUsd(plan.model),
     ),
   };
 }

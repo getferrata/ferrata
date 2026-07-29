@@ -5,6 +5,9 @@ import { VerifyCourse } from "@/components/verify-course";
 import { getDueSummary } from "@/lib/review/due";
 import { StateChip } from "./state-chip";
 import { ExportButton } from "./export-button";
+import { AssessmentToggle } from "./assessment-toggle";
+import { AddMaterial } from "./add-material";
+import { ProposedUpdates, type ProposalView } from "./proposed-updates";
 import { DeleteCourse } from "./delete-course";
 import { CourseReceipt } from "./course-receipt";
 import { ConceptGraph } from "./concept-graph";
@@ -22,6 +25,9 @@ export function CourseOverview({
   userId,
   verifiedByName = null,
   canVerify = false,
+  canEdit = false,
+  proposals = [],
+  analysing = false,
   deadline,
   resume,
 }: {
@@ -29,6 +35,12 @@ export function CourseOverview({
   userId?: string;
   verifiedByName?: string | null;
   canVerify?: boolean;
+  /** Owner examiner: may change how tests count and rework the course. */
+  canEdit?: boolean;
+  /** Pending proposals from newly added material (owner examiner only). */
+  proposals?: ProposalView[];
+  /** True while a propose_updates job for this course is queued or running. */
+  analysing?: boolean;
   deadline?: number | null;
   /** A student's resume bookmark: the last module they opened. */
   resume?: { moduleId: string; title: string } | null;
@@ -174,7 +186,8 @@ export function CourseOverview({
                         <StateChip state="untested" />
                         {m.questions.length > 0 ? (
                           <span className="text-step--1 text-text-muted">
-                            {m.questions.length} anchors
+                            {m.questions.length}{" "}
+                            {m.questions.length === 1 ? "anchor" : "anchors"}
                           </span>
                         ) : null}
                       </>
@@ -378,13 +391,42 @@ export function CourseOverview({
               >
                 What you actually know →
               </Link>
-              <ExportButton courseId={course.id} kind="package" />
-              <ExportButton courseId={course.id} kind="obsidian" />
-              <DeleteCourse courseId={course.id} />
+              {/* Export carries the answer keys and delete is destructive: both
+                  are the owner's, so students never see (or hit) them. */}
+              {canEdit ? (
+                <>
+                  <ExportButton courseId={course.id} kind="package" />
+                  <ExportButton courseId={course.id} kind="obsidian" />
+                  <DeleteCourse courseId={course.id} />
+                </>
+              ) : null}
             </div>
           </section>
+
+          {canEdit ? (
+            <section className="rounded border border-border p-4">
+              <h2 className="mb-3 text-step--1 uppercase tracking-wide text-text-muted">
+                Author
+              </h2>
+              <div className="flex flex-col gap-6">
+                <AssessmentToggle
+                  courseId={course.id}
+                  mode={course.assessmentMode}
+                />
+                <AddMaterial courseId={course.id} />
+              </div>
+            </section>
+          ) : null}
         </aside>
       </div>
+
+      {canEdit ? (
+        <ProposedUpdates
+          courseId={course.id}
+          proposals={proposals}
+          analysing={analysing}
+        />
+      ) : null}
 
       {course.scheduleMd ? (
         <details

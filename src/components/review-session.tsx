@@ -2,15 +2,19 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { countBlanks, shuffledOptions } from "@/lib/review/grade";
+import type { ClientQuestion } from "@/lib/review/grade";
 
 type Confidence = "low" | "medium" | "high";
 
-interface Card {
-  questionId: string;
+type Card = ClientQuestion & {
   conceptTitle: string;
-  prompt: string;
-  expectedAnswer: string;
   sureWrong: boolean;
+};
+
+interface Reveal {
+  correctIndex: number | null;
+  expectedAnswer: string | null;
 }
 
 const CONFIDENCE: { key: Confidence; label: string }[] = [
@@ -19,54 +23,111 @@ const CONFIDENCE: { key: Confidence; label: string }[] = [
   { key: "high", label: "Sure" },
 ];
 
+/** Where one card is: being answered, or answered and showing its result. */
+type Phase = "asking" | "revealed";
+
 /**
- * Interleaved spaced-review session. One card at a time:
- * confidence before reveal, self-grade after. A missed card (especially
- * sure-and-wrong) is re-queued to the end of THIS session, so the error you
- * didn't know you had comes back before you leave.
+ * Interleaved spaced-review session. One card at a time: confidence before
+ * reveal. A question the system can settle is answered and the server decides;
+ * anything only a reader can judge is self-graded. A failed save is shown as a
+ * failed save, never as a graded miss, and a missed card (especially
+ * sure-and-wrong) is re-queued so the error comes back before you leave.
  */
 export function ReviewSession({
   courseId,
   questions,
+  assessed = false,
 }: {
   courseId: string;
   questions: Card[];
+  /** Assessed course: a machine-settled answer counts once and is not retaken. */
+  assessed?: boolean;
 }) {
   const initial = useMemo(() => questions, [questions]);
   const [queue, setQueue] = useState<Card[]>(initial);
   const [pos, setPos] = useState(0);
   const [confidence, setConfidence] = useState<Confidence | null>(null);
-  const [revealed, setRevealed] = useState(false);
+  const [choice, setChoice] = useState<number | null>(null);
+  const [blanks, setBlanks] = useState<string[]>([]);
+  const [phase, setPhase] = useState<Phase>("asking");
+  const [outcome, setOutcome] = useState<boolean | null>(null);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [stats, setStats] = useState({ answered: 0, missed: 0 });
 
   const card = queue[pos];
   const total = initial.length;
 
-  function next(afterRequeue: boolean, requeued?: Card) {
+  const usableMcq =
+    card?.format === "mcq" && card.options !== null && card.options.length >= 2;
+  const blankCount = card ? countBlanks(card.prompt) : 0;
+  const usableCloze =
+    card?.format === "cloze" && card.autoGraded && blankCount > 0;
+  const auto = usableMcq || usableCloze;
+
+  const shown = useMemo(
+    () => (usableMcq && card ? shuffledOptions(card.options!, card.id) : []),
+    [usableMcq, card],
+  );
+
+  function advance() {
+    // A missed card comes back later in the same session, which is the point of
+    // retrieval practice. Not in an assessed course: there the answer has just
+    // been settled and counts once, so putting it back would only offer a
+    // retake the server is going to refuse.
+    const requeue = outcome === false && !(assessed && auto) ? card : undefined;
     setConfidence(null);
-    setRevealed(false);
-    if (afterRequeue && requeued) {
-      setQueue((q) => [...q, requeued]);
-    }
+    setChoice(null);
+    setBlanks([]);
+    setPhase("asking");
+    setOutcome(null);
+    setReveal(null);
+    setSaving(false);
+    setSaveError(false);
+    if (requeue) setQueue((q) => [...q, requeue]);
     setPos((p) => p + 1);
   }
 
-  async function grade(correct: boolean) {
-    if (!card) return;
-    const conf = confidence ?? "medium";
-    void fetch("/api/reviews", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        questionId: card.questionId,
-        correct,
-        confidence: conf,
-        courseId,
-      }),
-    }).catch(() => {});
-    setStats((s) => ({ answered: s.answered + 1, missed: s.missed + (correct ? 0 : 1) }));
-    // Re-queue a miss so it returns before the session ends.
-    next(!correct, !correct ? card : undefined);
+  /**
+   * Send the answer and wait for the verdict. On failure nothing is recorded
+   * and nothing is shown as graded: a network error is not a miss, and the card
+   * stays answerable.
+   */
+  async function answer(body: Record<string, unknown>) {
+    if (!card || saving) return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      const res = await fetch("/api/reviews", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          questionId: card.id,
+          confidence: confidence ?? "medium",
+          courseId,
+          ...body,
+        }),
+      });
+      if (!res.ok) {
+        setSaving(false);
+        setSaveError(true);
+        return;
+      }
+      const data = (await res.json()) as { correct?: boolean; reveal?: Reveal };
+      const correct = data.correct === true;
+      setReveal(data.reveal ?? null);
+      setOutcome(correct);
+      setPhase("revealed");
+      setSaving(false);
+      setStats((s) => ({
+        answered: s.answered + 1,
+        missed: s.missed + (correct ? 0 : 1),
+      }));
+    } catch {
+      setSaving(false);
+      setSaveError(true);
+    }
   }
 
   if (!card) {
@@ -95,6 +156,18 @@ export function ReviewSession({
     );
   }
 
+  const filledBlanks = Array.from(
+    { length: blankCount },
+    (_, i) => blanks[i] ?? "",
+  );
+  const ready =
+    confidence !== null &&
+    (!usableMcq || choice !== null) &&
+    (!usableCloze || filledBlanks.every((b) => b.trim().length > 0));
+  const locked = phase === "revealed";
+  const answerText = reveal?.expectedAnswer ?? card.expectedAnswer;
+  const correctIndex = reveal?.correctIndex ?? card.correctIndex;
+
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between text-step--1 text-text-muted">
@@ -117,8 +190,9 @@ export function ReviewSession({
             type="button"
             onClick={() => setConfidence(c.key)}
             aria-pressed={confidence === c.key}
+            disabled={locked}
             className={
-              "min-h-[36px] rounded border px-3 text-step--1 transition " +
+              "min-h-[36px] rounded border px-3 text-step--1 transition disabled:opacity-60 " +
               (confidence === c.key
                 ? "border-accent bg-accent text-accent-contrast"
                 : "border-border text-text-muted hover:text-text")
@@ -129,38 +203,143 @@ export function ReviewSession({
         ))}
       </div>
 
+      {usableMcq ? (
+        <fieldset className="mt-6 flex flex-col gap-2" disabled={locked}>
+          <legend className="sr-only">Choose one</legend>
+          {shown.map((o) => (
+            <label
+              key={o.index}
+              className={
+                "flex cursor-pointer items-start gap-3 rounded border p-3 text-step-0 transition " +
+                (choice === o.index
+                  ? "border-accent"
+                  : "border-border hover:bg-bg-subtle") +
+                (locked && correctIndex === o.index ? " border-state-solid" : "")
+              }
+            >
+              <input
+                type="radio"
+                name={`card-${card.id}`}
+                checked={choice === o.index}
+                onChange={() => setChoice(o.index)}
+                className="mt-1"
+              />
+              <span>{o.text}</span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+
+      {usableCloze ? (
+        <div className="mt-6 flex flex-wrap gap-2">
+          {Array.from({ length: blankCount }, (_, i) => (
+            <input
+              key={i}
+              type="text"
+              value={blanks[i] ?? ""}
+              onChange={(e) =>
+                setBlanks((b) => {
+                  const next = [...b];
+                  next[i] = e.target.value;
+                  return next;
+                })
+              }
+              disabled={locked}
+              aria-label={`Blank ${i + 1}`}
+              className="min-h-[40px] rounded border border-border bg-surface px-3 text-step-0 text-text disabled:opacity-60"
+            />
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-6">
-        {!revealed ? (
-          <button
-            type="button"
-            disabled={confidence === null}
-            onClick={() => setRevealed(true)}
-            className="min-h-[44px] rounded border border-text px-5 text-step-0 text-text transition hover:bg-bg-subtle disabled:opacity-40"
-          >
-            Show the answer
-          </button>
+        {phase === "asking" ? (
+          <>
+            <button
+              type="button"
+              disabled={!ready || saving}
+              onClick={() => {
+                if (usableMcq) {
+                  void answer({ choiceIndex: choice });
+                } else if (usableCloze) {
+                  void answer({ blanks: filledBlanks });
+                } else {
+                  // Only the reader can judge this one, so reveal and let them.
+                  setPhase("revealed");
+                }
+              }}
+              className="min-h-[44px] rounded border border-text px-5 text-step-0 text-text transition hover:bg-bg-subtle disabled:opacity-40"
+            >
+              {saving ? "Checking…" : auto ? "Answer" : "Show the answer"}
+            </button>
+            {saveError ? (
+              <p className="mt-3 text-step--1 text-danger">
+                Not saved: the review didn&rsquo;t reach the server. Try again.
+              </p>
+            ) : null}
+          </>
         ) : (
           <div>
-            <div className="rounded bg-bg-subtle p-4 font-serif text-step-0 text-text">
-              {card.expectedAnswer}
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <span className="text-step--1 text-text-muted">How did it go?</span>
-              <button
-                type="button"
-                onClick={() => grade(true)}
-                className="min-h-[40px] rounded border border-state-solid px-4 text-step-0 text-state-solid hover:bg-bg-subtle"
-              >
-                I had it
-              </button>
-              <button
-                type="button"
-                onClick={() => grade(false)}
-                className="min-h-[40px] rounded border border-danger px-4 text-step-0 text-danger hover:bg-bg-subtle"
-              >
-                I missed it
-              </button>
-            </div>
+            {answerText ? (
+              <div className="rounded bg-bg-subtle p-4 font-serif text-step-0 text-text">
+                {answerText}
+              </div>
+            ) : null}
+
+            {!auto && outcome === null ? (
+              <div className="mt-4 flex items-center gap-3">
+                <span className="text-step--1 text-text-muted">
+                  How did it go?
+                </span>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void answer({ correct: true })}
+                  className="min-h-[40px] rounded border border-state-solid px-4 text-step-0 text-state-solid hover:bg-bg-subtle disabled:opacity-50"
+                >
+                  I had it
+                </button>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void answer({ correct: false })}
+                  className="min-h-[40px] rounded border border-danger px-4 text-step-0 text-danger hover:bg-bg-subtle disabled:opacity-50"
+                >
+                  I missed it
+                </button>
+                {saveError ? (
+                  <span className="text-step--1 text-danger">
+                    Not saved. Try again.
+                  </span>
+                ) : null}
+              </div>
+            ) : outcome !== null ? (
+              <div className="mt-4 flex items-center gap-4">
+                <span
+                  className={
+                    "text-step-0 " +
+                    (outcome
+                      ? "text-state-solid"
+                      : confidence === "high"
+                        ? "text-danger"
+                        : "text-text-muted")
+                  }
+                >
+                  {outcome
+                    ? "Right."
+                    : confidence === "high"
+                      ? "Sure and wrong: this one comes back first."
+                      : "Not this time. It comes back."}
+                </span>
+                <button
+                  type="button"
+                  onClick={advance}
+                  className="min-h-[40px] rounded border border-text px-4 text-step-0 text-text hover:bg-bg-subtle"
+                >
+                  Next
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
       </div>

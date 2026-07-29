@@ -1,0 +1,1 @@
+ALTER TABLE `courses` ADD `assessment_mode` text DEFAULT 'practice' NOT NULL;

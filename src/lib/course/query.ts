@@ -1,6 +1,7 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { plainText } from "@/lib/text";
+import { openSecret } from "@/lib/crypto/secrets";
 import {
   concepts as conceptsT,
   courses as coursesT,
@@ -49,7 +50,9 @@ export function getCourseBundle(courseId: string): CourseBundle | null {
   const concepts = db
     .select()
     .from(conceptsT)
-    .where(eq(conceptsT.courseId, courseId))
+    .where(
+      and(eq(conceptsT.courseId, courseId), isNull(conceptsT.retiredAt)),
+    )
     .orderBy(asc(conceptsT.topoOrder), asc(conceptsT.estimatedMinutes))
     .all()
     .map((c) => ({
@@ -66,7 +69,12 @@ export function getCourseBundle(courseId: string): CourseBundle | null {
     ? db
         .select()
         .from(questionsT)
-        .where(inArray(questionsT.conceptId, conceptIds))
+        .where(
+          and(
+            inArray(questionsT.conceptId, conceptIds),
+            isNull(questionsT.retiredAt),
+          ),
+        )
         .all()
     : [];
 
@@ -111,7 +119,11 @@ export function getCourseBundle(courseId: string): CourseBundle | null {
     })
     .from(restorationsT)
     .where(eq(restorationsT.courseId, courseId))
-    .all();
+    .all()
+    // Values are sealed at rest; decrypt them here, the single read boundary, so
+    // rendering and the export leak-guard both see the real value. openSecret
+    // returns legacy plaintext rows unchanged.
+    .map((r) => ({ ...r, value: openSecret(r.value) }));
 
   return { course, modules, edges, cuts, sources: srcs, restorations: restos };
 }

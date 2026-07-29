@@ -40,7 +40,7 @@ export async function testAnthropic(
         messages: [{ role: "user", content: "Reply with OK." }],
       }),
     });
-    if (res.ok) return { ok: true, detail: `${model} responded` };
+    if (res.ok) return { ok: true, detail: `key works, checked with ${model}` };
     const body = await res.text();
     return { ok: false, detail: `HTTP ${res.status}: ${body.slice(0, 200)}` };
   } catch (err) {
@@ -69,7 +69,7 @@ export async function testOpenAiCompat(
         }),
       },
     );
-    if (res.ok) return { ok: true, detail: `${model} responded` };
+    if (res.ok) return { ok: true, detail: `key works, checked with ${model}` };
     const body = await res.text();
     return { ok: false, detail: `HTTP ${res.status}: ${body.slice(0, 200)}` };
   } catch (err) {

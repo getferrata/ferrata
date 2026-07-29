@@ -23,6 +23,7 @@ const COURSE_GETS = (id: string) => [
   `/courses/${id}/review`,
   `/api/courses/${id}`,
   `/api/courses/${id}/package`,
+  `/api/courses/${id}/proposals`,
 ];
 
 /** Endpoints that change something or spend money. */
@@ -38,6 +39,10 @@ const PRIVILEGED_POSTS = (id: string) => [
   { url: `/api/courses/${id}/concepts`, body: { dropIds: [] } },
   { url: `/api/courses/${id}/retry`, body: {} },
   { url: `/api/courses/${id}/verify`, body: {} },
+  { url: `/api/courses/${id}/sources`, body: {} },
+  { url: `/api/courses/${id}/assessment`, body: { mode: "assessed" } },
+  { url: `/api/courses/${id}/proposals/prop_x`, body: { action: "approve" } },
+  { url: `/api/courses/${id}/modules/module_x/regenerate`, body: {} },
   { url: "/api/settings/llm", body: { values: {} } },
   { url: "/api/settings/credits", body: { limit: "1" } },
   { url: "/api/settings/llm/test", body: {} },

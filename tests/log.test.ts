@@ -11,6 +11,9 @@ beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
+  // The suite runs at `silent`; these tests are about the logger itself, so
+  // they start from the default threshold and set their own where it matters.
+  delete process.env.FERRATA_LOG_LEVEL;
 });
 
 afterEach(() => {

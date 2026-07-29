@@ -91,6 +91,7 @@ export default async function ExaminerPage() {
                     </Link>
                   </h2>
                   <span className="text-step--1 text-text-muted">
+                    {c.assessmentMode === "assessed" ? "assessed · " : ""}
                     {c.status === "ready" ? "ready" : c.status}
                   </span>
                 </div>
