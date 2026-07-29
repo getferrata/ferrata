@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY patches ./patches
+# No patches directory: nothing in package.json patches a dependency. If that
+# changes, this needs a COPY back, because a patch missing from the build
+# context is applied silently nowhere and the image is quietly not the app.
 RUN pnpm install --frozen-lockfile
 
 FROM node:22-bookworm-slim AS build
