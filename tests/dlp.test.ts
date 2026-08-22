@@ -191,3 +191,32 @@ describe("the placeholder key survives a restart", () => {
     expect(token(second.text)).toBe(token(first.text));
   });
 });
+
+describe("addresses an RFC fixes, through the real detector", () => {
+  it("leaves the textbook ones in clear and protects the real one beside them", async () => {
+    // The end to end version of the allowlist. The unit test asks the
+    // predicate; this asks the engine, because a value the engine tokenizes
+    // anyway is a value the reader loses no matter what the predicate says.
+    const scan = await scanSensitivity(
+      [
+        "I blocchi privati sono 10.0.0.0/8, 172.16.0.0/12 e 192.168.0.0/16.",
+        "La documentazione usa 192.0.2.1 e 203.0.113.42.",
+        "Il nostro core sta su 10.20.34.7, maschera 255.255.255.0.",
+      ].join("\n"),
+      "rete.md",
+    );
+
+    for (const kept of [
+      "10.0.0.0",
+      "172.16.0.0",
+      "192.168.0.0",
+      "192.0.2.1",
+      "203.0.113.42",
+      "255.255.255.0",
+    ]) {
+      expect(scan.text, kept).toContain(kept);
+    }
+    expect(scan.text).not.toContain("10.20.34.7");
+    expect(scan.restorations.map((r) => r.value)).toEqual(["10.20.34.7"]);
+  });
+});

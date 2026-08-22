@@ -14,14 +14,18 @@
  * ceiling sat exactly on their output:
  *
  *   stage               ceiling   longest output   calls kept / made
- *   concreteness_pass      8000             8000                7 / 17
+ *   concreteness_pass      8000             8000                7 / 17   (*)
  *   eval_judge             2000             2000                6 / 20
  *   write_questions        3500             3500                5 / 14
  *   intake                 4096             4096                1 / 9
  *   write_module           8000             6480                8 / 8
  *
  * write_module was the only stage with room, and it is the only one that cost
- * what it should. So the rule these numbers imply: leave real headroom above
+ * what it should.
+ *
+ * (*) concreteness_pass has since stopped returning the module and returns the
+ * edits to make instead, so its row measures a shape the stage no longer has.
+ * Left in because it is the evidence for the rule below, not a live figure. So the rule these numbers imply: leave real headroom above
  * the longest answer a stage can legitimately produce. Unused headroom is free,
  * because a call is billed on the tokens it emits, not on what it was allowed
  * to emit.
@@ -40,8 +44,14 @@ export const OUTPUT_CAPS = {
    * would have put it in the same place as the others.
    */
   write_module: 10_000,
-  /** Re-emits the whole module body plus its notes, so it needs the most room. */
-  concreteness_pass: 16_000,
+  /**
+   * A list of replacements, not the module again. It held the highest ceiling
+   * in the pipeline while it re-emitted the whole body; a few dozen short
+   * find/replace pairs need a fraction of that, and the headroom is kept
+   * because a module with many abstract passages legitimately produces many
+   * edits.
+   */
+  concreteness_pass: 6_000,
   /** A verdict that quotes the passages it objects to, not a bare score. */
   eval_judge: 4_000,
   /** Six to eight questions with expected answers and misconceptions. */

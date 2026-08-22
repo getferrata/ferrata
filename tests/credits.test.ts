@@ -16,6 +16,8 @@ const {
   spentBy,
   balanceFor,
   assertWithinLimit,
+  reserveCredits,
+  reservedBy,
   CreditLimitError,
   CREDIT_LIMIT_KEY,
   CREDIT_WINDOW_KEY,
@@ -210,5 +212,84 @@ describe("the actor context", () => {
     ]);
     expect(a).toBe("user_a");
     expect(b).toBe("user_b");
+  });
+});
+
+describe("calls that have not landed yet", () => {
+  // Reservations outlive a single test the way they outlive a single call, so
+  // anything a test takes out is handed back here. In the app that is what the
+  // finally in runStructuredTask does.
+  const held: Array<() => void> = [];
+  const hold = (userId: string | null, credits: number): (() => void) => {
+    const release = reserveCredits(userId, credits);
+    held.push(release);
+    return release;
+  };
+
+  afterEach(() => {
+    for (const release of held.splice(0)) release();
+  });
+
+  it("counts work in flight against the ceiling", () => {
+    // The ledger is written when a call finishes. Four modules writing at once
+    // would otherwise each be waved through on the same stale figure, and the
+    // ceiling would be read three calls too late.
+    setSetting(CREDIT_LIMIT_KEY, "100");
+    charge("user_a", 60);
+    expect(() => assertWithinLimit("user_a")).not.toThrow();
+
+    const release = hold("user_a", 50);
+    expect(reservedBy("user_a")).toBe(50);
+    expect(() => assertWithinLimit("user_a")).toThrow(CreditLimitError);
+
+    release();
+    expect(reservedBy("user_a")).toBe(0);
+    expect(() => assertWithinLimit("user_a")).not.toThrow();
+  });
+
+  it("holds one reservation per concurrent call and releases them one at a time", () => {
+    setSetting(CREDIT_LIMIT_KEY, "100");
+    const releases = [10, 20, 30].map((c) => hold("user_a", c));
+    expect(reservedBy("user_a")).toBe(60);
+    releases[0]!();
+    expect(reservedBy("user_a")).toBe(50);
+    releases[1]!();
+    releases[2]!();
+    expect(reservedBy("user_a")).toBe(0);
+  });
+
+  it("ignores a release called twice, so a finally can be unconditional", () => {
+    const release = hold("user_a", 25);
+    release();
+    release();
+    expect(reservedBy("user_a")).toBe(0);
+  });
+
+  it("keeps one person's in-flight work off another's balance", () => {
+    setSetting(CREDIT_LIMIT_KEY, "50");
+    hold("user_a", 50);
+    expect(() => assertWithinLimit("user_a")).toThrow(CreditLimitError);
+    expect(() => assertWithinLimit("user_b")).not.toThrow();
+  });
+
+  it("reserves nothing for a free call or an actorless script", () => {
+    // Ollama costs nothing, so it has nothing to hold; a seed script has
+    // nobody to hold it against.
+    hold("user_a", 0)();
+    hold(null, 40)();
+    expect(reservedBy("user_a")).toBe(0);
+  });
+
+  it("says the committed figure, not just the settled one, when it refuses", () => {
+    setSetting(CREDIT_LIMIT_KEY, "100");
+    charge("user_a", 40);
+    hold("user_a", 70);
+    try {
+      assertWithinLimit("user_a");
+      throw new Error("expected the ceiling to fire");
+    } catch (err) {
+      expect(err).toBeInstanceOf(CreditLimitError);
+      expect((err as InstanceType<typeof CreditLimitError>).spent).toBe(110);
+    }
   });
 });

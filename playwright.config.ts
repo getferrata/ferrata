@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { defineConfig } from "@playwright/test";
+import { EXPECT_TIMEOUT, TEST_TIMEOUT, wait } from "./e2e/timeouts";
 
 const APP_PORT = process.env.E2E_APP_PORT ?? "3100";
 const BASE_URL = `http://127.0.0.1:${APP_PORT}`;
@@ -18,8 +19,8 @@ export default defineConfig({
   // they run in order, one worker, like a real single-server install.
   fullyParallel: false,
   workers: 1,
-  timeout: 90_000,
-  expect: { timeout: 15_000 },
+  timeout: TEST_TIMEOUT,
+  expect: { timeout: EXPECT_TIMEOUT },
   retries: 0,
   reporter: [["list"]],
   outputDir: "e2e/.artifacts/test-results",
@@ -44,6 +45,6 @@ export default defineConfig({
     // or loaded machine a cold build can take several minutes, so this is
     // generous: a false "webServer timed out" reads as a code failure when it
     // is only the box being busy.
-    timeout: 420_000,
+    timeout: wait(420),
   },
 });

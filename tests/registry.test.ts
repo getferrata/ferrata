@@ -79,3 +79,68 @@ describe("a Groq key pasted into the OpenAI slot", () => {
     expect(plan.model).toBe("moonshotai/kimi-k2-instruct");
   });
 });
+
+describe("addressing a model explicitly", () => {
+  // The alternative was three variables that have to agree: a key, a base URL,
+  // and a model name, with the host inferred from the shape of the key. That
+  // works for the two hosts somebody thought of and sends everyone else to
+  // api.openai.com asking for gpt-4o, which is discovered by paying for it.
+  it("takes the provider and the model from one string", () => {
+    const e = { FERRATA_MODEL_HEAVY: "anthropic/claude-opus-5" };
+    const p = planTask("write_module", e);
+    expect(p.providerName).toBe("anthropic");
+    expect(p.model).toBe("claude-opus-5");
+  });
+
+  it("keeps the slashes inside a model id, which OpenRouter names are full of", () => {
+    const e = { FERRATA_MODEL_HEAVY: "openai/anthropic/claude-3.5-sonnet" };
+    expect(planTask("write_module", e).model).toBe("anthropic/claude-3.5-sonnet");
+  });
+
+  it("addresses the tiers separately, which is the point of tiering", () => {
+    const e = {
+      FERRATA_MODEL_HEAVY: "anthropic/claude-opus-5",
+      FERRATA_MODEL_LIGHT: "ollama/qwen2.5:3b",
+    };
+    expect(planTask("write_module", e).model).toBe("claude-opus-5");
+    expect(planTask("glossary", e).providerName).toBe("ollama");
+    expect(planTask("glossary", e).model).toBe("qwen2.5:3b");
+  });
+
+  it("beats the override, being the more specific instruction", () => {
+    const e = {
+      FERRATA_LLM_OVERRIDE: "ollama",
+      FERRATA_MODEL_HEAVY: "anthropic/claude-sonnet-5",
+      ANTHROPIC_API_KEY: "sk-ant",
+    };
+    expect(planTask("write_module", e).providerName).toBe("anthropic");
+  });
+
+  it("leaves the other tier alone when only one is addressed", () => {
+    const e = { FERRATA_MODEL_HEAVY: "ollama/qwen2.5:7b", OPENAI_API_KEY: "sk" };
+    expect(planTask("write_module", e).providerName).toBe("ollama");
+    expect(planTask("glossary", e).providerName).toBe("openai");
+  });
+
+  it("refuses a malformed address instead of guessing at it", () => {
+    // Silence here would be the same failure as before, one variable later.
+    for (const bad of ["claude-sonnet-5", "anthropic/", "/model"]) {
+      expect(() => planTask("write_module", { FERRATA_MODEL_HEAVY: bad }), bad).toThrow(
+        /provider\/model/,
+      );
+    }
+  });
+
+  it("names the providers it knows when given one it does not", () => {
+    expect(() =>
+      planTask("write_module", { FERRATA_MODEL_HEAVY: "bedrock/some-model" }),
+      // The message has to name the three that work, or it tells somebody they
+      // are wrong without telling them what is right.
+    ).toThrow(/Use .*, openai .*ollama/s);
+  });
+
+  it("is ignored when unset, so nothing changes for anybody not using it", () => {
+    const e = { ANTHROPIC_API_KEY: "sk-ant", FERRATA_MODEL_HEAVY: "  " };
+    expect(planTask("write_module", e).model).toBe("claude-sonnet-5");
+  });
+});

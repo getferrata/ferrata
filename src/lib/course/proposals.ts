@@ -11,7 +11,15 @@ import {
 } from "@/db/schema";
 import { newId, now } from "@/lib/util/id";
 import { enqueueRegenerateModuleOnce } from "@/lib/jobs/queue";
+import { decideFigure } from "@/lib/sources/figures";
 import type { ProposalItem } from "@/lib/llm/tasks/propose_updates/schema";
+
+/** place_figure payload as stored in payloadJson. */
+export interface FigurePlacement {
+  figureId: string;
+  /** The picture this one takes the place of, withdrawn on approval. */
+  replacesFigureId: string | null;
+}
 
 /** add_concept payload as stored in payloadJson. */
 export interface ConceptCandidate {
@@ -32,6 +40,8 @@ export function recordProposals(
   courseId: string,
   items: readonly ProposalItem[],
   conceptsShown: readonly { id: string; title: string }[],
+  /** The pictures the prompt numbered, in the same order it numbered them. */
+  figuresShown: readonly { id: string }[] = [],
 ): number {
   // One pending proposal per target. Guards three ways in: the job is retried
   // after a crash, the author can upload the same file twice, and a single
@@ -72,6 +82,41 @@ export function recordProposals(
     const target =
       item.conceptIndex !== null ? conceptsShown[item.conceptIndex] : undefined;
     if (!target) continue;
+
+    if (item.kind === "place_figure") {
+      // Two indexes into two different lists, and both are the model's word.
+      // A picture number that names nothing is dropped rather than stored,
+      // like an invented concept number: the author cannot act on "show
+      // picture 7" when there is no seventh picture.
+      const figure =
+        item.figureIndex != null ? figuresShown[item.figureIndex] : undefined;
+      if (!figure) continue;
+      const replaced =
+        item.replacesFigureIndex != null
+          ? figuresShown[item.replacesFigureIndex]
+          : undefined;
+      // Keyed on both, so two pictures can be proposed for one module while
+      // the same picture cannot be proposed for it twice.
+      if (!take("place_figure", `${target.id}:${figure.id}`)) continue;
+      const payload: FigurePlacement = {
+        figureId: figure.id,
+        replacesFigureId: replaced?.id ?? null,
+      };
+      db.insert(proposals)
+        .values({
+          id: newId("prop"),
+          courseId,
+          kind: "place_figure",
+          conceptId: target.id,
+          title: target.title,
+          reason: item.reason,
+          payloadJson: JSON.stringify(payload),
+        })
+        .run();
+      stored++;
+      continue;
+    }
+
     if (!take(item.kind, target.id)) continue;
     db.insert(proposals)
       .values({
@@ -90,8 +135,33 @@ export function recordProposals(
 }
 
 export type ApplyResult =
-  | { ok: true; effect: "queued_rewrite" | "queued_new_module" | "retired" }
+  | {
+      ok: true;
+      effect:
+        | "queued_rewrite"
+        | "queued_new_module"
+        | "retired"
+        | "figure_placed";
+    }
   | { ok: false; error: string };
+
+/** place_figure payload, or null when it is not one or is malformed. */
+function parsePlacement(json: string | null): FigurePlacement | null {
+  if (!json) return null;
+  try {
+    const v: unknown = JSON.parse(json);
+    if (typeof v !== "object" || v === null) return null;
+    const o = v as Record<string, unknown>;
+    if (typeof o.figureId !== "string" || o.figureId === "") return null;
+    const replaces = o.replacesFigureId;
+    return {
+      figureId: o.figureId,
+      replacesFigureId: typeof replaces === "string" ? replaces : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Apply one approved proposal. Called from the decision endpoint, after the
@@ -152,6 +222,37 @@ export function applyProposal(
       .run();
     enqueueRegenerateModuleOnce(proposal.courseId, conceptId, actorUserId);
     return { ok: true, effect: "queued_new_module" };
+  }
+
+  if (proposal.kind === "place_figure") {
+    if (!proposal.conceptId) return { ok: false, error: "no concept" };
+    const placement = parsePlacement(proposal.payloadJson);
+    if (!placement) return { ok: false, error: "the proposal is malformed" };
+
+    // Approving "show this picture in that module" is approving the picture.
+    // Asking again in the figure queue would be asking the same question
+    // twice, and until it is answered the rewrite below would place a token
+    // that renders as nothing.
+    if (!decideFigure(proposal.courseId, placement.figureId, "approved", actorUserId)) {
+      return { ok: false, error: "the picture no longer exists" };
+    }
+    // Withdrawn rather than deleted, so it stops being rendered while the
+    // record of it, and of who decided, survives. A superseded diagram taught
+    // beside its replacement is the failure this whole proposal exists for.
+    if (placement.replacesFigureId) {
+      decideFigure(
+        proposal.courseId,
+        placement.replacesFigureId,
+        "rejected",
+        actorUserId,
+      );
+    }
+    // The body is not edited here. The rewrite goes through the same quality
+    // loop as any other module, reads the material as it now stands, and
+    // places the token where the prose calls for it. Splicing a token into an
+    // existing body would put the picture at a position nobody chose.
+    enqueueRegenerateModuleOnce(proposal.courseId, proposal.conceptId, actorUserId);
+    return { ok: true, effect: "figure_placed" };
   }
 
   // retire_concept

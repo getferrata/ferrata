@@ -21,6 +21,7 @@ const KIND_LABEL: Record<ProposalKind, string> = {
   update_module: "Update",
   add_concept: "New module",
   retire_concept: "Retire",
+  place_figure: "Picture",
 };
 
 /** What approving actually does, stated on the button's own card. */
@@ -31,6 +32,8 @@ const KIND_EFFECT: Record<ProposalKind, string> = {
     "Approving adds this concept at the end of the path and writes its module. Costs about one module of a build.",
   retire_concept:
     "Approving moves it to the cut list and deletes the module, its tests and the answers given on them.",
+  place_figure:
+    "Approving accepts this picture, withdraws the one it replaces, and rewrites the module so the drawing sits where the text calls for it. Costs about one module of a build.",
 };
 
 /**

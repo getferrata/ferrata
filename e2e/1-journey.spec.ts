@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { wait } from "./timeouts";
 
 /**
  * The critical authoring journey, end to end on the real pipeline (jobs,
@@ -23,12 +24,12 @@ test("author creates a course from brief to ready", async ({ page }) => {
       "Onboard a new on-call engineer on the Acme edge gateway. Two weeks.",
     );
   await page.getByRole("button", { name: /Rig the path/ }).click();
-  await page.waitForURL(/\/courses\//, { timeout: 30_000 });
+  await page.waitForURL(/\/courses\//, { timeout: wait(30) });
 
   // Interview (mock produces two questions); answer one, continue.
   await expect(
     page.getByRole("heading", { name: "A few questions" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
   await page
     .locator("textarea")
     .first()
@@ -38,7 +39,7 @@ test("author creates a course from brief to ready", async ({ page }) => {
   // Concept review (mock intake returns three concepts). Uncheck nothing.
   await expect(
     page.getByRole("heading", { name: "Review the plan before building" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
   await expect(page.getByText("The edge gateway").first()).toBeVisible();
   await expect(page.getByText("Reading a 503").first()).toBeVisible();
 
@@ -53,11 +54,11 @@ test("author creates a course from brief to ready", async ({ page }) => {
     page.getByText("You can close this page. Generation keeps running", {
       exact: false,
     }),
-  ).toBeVisible({ timeout: 30_000 });
+  ).toBeVisible({ timeout: wait(30) });
 
   // Ready: overview appears with the route and the generated modules.
   await expect(page.getByRole("heading", { name: "The route" })).toBeVisible({
-    timeout: 90_000,
+    timeout: wait(90),
   });
   await expect(
     page.getByRole("heading", { name: "Acme edge onboarding" }),
@@ -66,6 +67,11 @@ test("author creates a course from brief to ready", async ({ page }) => {
   // Open the first module: content and its anchors (tests) are there.
   await page.getByRole("link", { name: /The edge gateway/ }).first().click();
   await expect(page.getByText("The idea, in two lines")).toBeVisible();
+
+  // Note for whoever adds to this: the suite runs with FERRATA_LITE=1, so the
+  // concreteness pass and the judge never run here. This journey covers one
+  // model call per module. The two skipped stages are covered by the preflight
+  // in 3-settings, which calls them directly.
   await expect(page.getByRole("heading", { name: "Anchors" })).toBeVisible();
   await expect(
     page.getByText("A 503 at the edge: what is the first thing you check?"),

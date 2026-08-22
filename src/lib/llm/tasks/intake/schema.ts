@@ -19,7 +19,7 @@ export const intakeSchema = z.object({
   /** The honest, reframed objective: not "master X", but what success really is. */
   objective: z.string().min(1),
   domain: z.string().min(1),
-  /** The learner's declared/​inferred starting point. */
+  /** The learner's declared/inferred starting point. */
   startLevel: z.string().min(1),
   /** Natural-language deadline as written, or null. Parsed downstream. */
   deadline: z.string().nullable(),

@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { courses as coursesT } from "@/db/schema";
+import { courses as coursesT, modules as modulesT } from "@/db/schema";
 import { plainText } from "@/lib/text";
-import { getDashboard, type ConceptRetention } from "./dashboard";
+import { conceptRetentionByStudent } from "./dashboard";
 import { getRoster, type StudentProgress } from "./roster";
+import { failedQuestionsByConcept } from "./weakness";
 
 /**
  * What a course looks like across everyone studying it.
@@ -34,7 +35,27 @@ export interface CourseAggregate {
    * A concept one person struggles with is that person's gap; one that half the
    * class is weak on is a problem with the module, and worth the author's time.
    */
-  weakForMany: { conceptId: string; title: string; weakStudents: number }[];
+  weakForMany: WeakConcept[];
+}
+
+export interface WeakConcept {
+  conceptId: string;
+  /**
+   * The module to rewrite, when one exists. Null for a concept whose module was
+   * never written or failed: there is nothing to offer a rewrite of, and an
+   * action pointing at a missing module would 404 on click.
+   */
+  moduleId: string | null;
+  title: string;
+  weakStudents: number;
+  /**
+   * Questions in this concept more readers get wrong than right: the material a
+   * rewrite would actually be given. Zero means the class is weak by the
+   * spacing model's reckoning but nobody has failed a specific question, so a
+   * rewrite has nothing concrete to aim at and the page should not pretend
+   * otherwise.
+   */
+  failedQuestions: number;
 }
 
 /** Below this, a concept counts as weak for a student. */
@@ -66,13 +87,18 @@ export function getCourseAggregate(
   const measured = students.filter((s) => s.retention !== null);
   const medianRetention = median(measured.map((s) => s.retention as number));
 
-  // Concept-level weakness has to come from each student's own dashboard, since
-  // that is the only place the per-concept figure is scoped to one person.
+  // Concept-level weakness is per student, because that is the only scope in
+  // which the figure means anything. Read for the whole roster in one pass:
+  // asking each student's dashboard separately re-read every review in the
+  // course once per student, and the class this page exists for is the big one.
+  const byStudent = conceptRetentionByStudent(
+    courseId,
+    measured.map((s) => s.userId),
+    at,
+  );
   const weakCount = new Map<string, { title: string; n: number }>();
-  for (const s of measured) {
-    const d = getDashboard(courseId, at, s.userId);
-    if (!d) continue;
-    for (const c of d.concepts as ConceptRetention[]) {
+  for (const concepts of byStudent.values()) {
+    for (const c of concepts) {
       if (c.retention === null || c.retention >= WEAK_BELOW) continue;
       const cur = weakCount.get(c.conceptId) ?? { title: c.title, n: 0 };
       cur.n += 1;
@@ -80,14 +106,34 @@ export function getCourseAggregate(
     }
   }
   const half = Math.ceil(measured.length / 2);
-  const weakForMany = [...weakCount.entries()]
+  const weak = [...weakCount.entries()]
     .filter(([, v]) => measured.length > 0 && v.n >= half)
-    .map(([conceptId, v]) => ({
-      conceptId,
-      title: v.title,
-      weakStudents: v.n,
-    }))
-    .sort((a, b) => b.weakStudents - a.weakStudents);
+    .sort((a, b) => b[1].n - a[1].n);
+
+  // Diagnosis is only half of it: the page offers to rewrite these modules
+  // against what readers got wrong, so it needs the module to rewrite and
+  // whether there is anything to rewrite it against. Both read in one query
+  // over the whole weak set rather than one per row.
+  const weakIds = weak.map(([conceptId]) => conceptId);
+  const moduleByConcept = new Map<string, string>();
+  if (weakIds.length > 0) {
+    for (const m of db
+      .select({ id: modulesT.id, conceptId: modulesT.conceptId })
+      .from(modulesT)
+      .where(inArray(modulesT.conceptId, weakIds))
+      .all()) {
+      moduleByConcept.set(m.conceptId, m.id);
+    }
+  }
+  const failures = failedQuestionsByConcept(courseId, weakIds);
+
+  const weakForMany: WeakConcept[] = weak.map(([conceptId, v]) => ({
+    conceptId,
+    moduleId: moduleByConcept.get(conceptId) ?? null,
+    title: v.title,
+    weakStudents: v.n,
+    failedQuestions: failures.get(conceptId)?.length ?? 0,
+  }));
 
   return {
     courseTitle,

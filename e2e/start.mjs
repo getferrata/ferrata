@@ -35,23 +35,43 @@ const env = {
   FERRATA_ALLOW_PRIVATE_URLS: "1",
 };
 
-const seed = spawnSync("pnpm", ["db:seed:demo"], { cwd: ROOT, env, stdio: "inherit" });
+/**
+ * Spawned as node against the tool's own JS entry point, not through pnpm.
+ *
+ * pnpm on Windows is `pnpm.cmd`, and current Node refuses to spawn a `.cmd`
+ * without `shell: true`, so this failed there with the seed reporting nothing
+ * more useful than a non-zero exit: the whole browser suite could not start on
+ * the platform the product is most often installed on.
+ *
+ * `shell: true` would fix the spawn and break the shutdown below, because kill
+ * would reach cmd.exe and leave the server it wrapped holding the port. Going
+ * straight to the entry point fixes both, and drops the requirement that pnpm
+ * be on PATH at all.
+ */
+const TSX = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+const NEXT = join(ROOT, "node_modules", "next", "dist", "bin", "next");
+
+const seed = spawnSync(
+  process.execPath,
+  [TSX, join(ROOT, "src", "db", "seed-demo.ts")],
+  { cwd: ROOT, env, stdio: "inherit" },
+);
 if (seed.status !== 0) {
   console.error("[e2e] demo seed failed");
   process.exit(1);
 }
 
-const mock = spawn("node", [join(ROOT, "e2e", "mock-llm.mjs")], {
+const mock = spawn(process.execPath, [join(ROOT, "e2e", "mock-llm.mjs")], {
   env,
   stdio: "inherit",
 });
-const wiki = spawn("node", [join(ROOT, "e2e", "mock-wiki.mjs")], {
+const wiki = spawn(process.execPath, [join(ROOT, "e2e", "mock-wiki.mjs")], {
   env,
   stdio: "inherit",
 });
 const app = spawn(
-  "pnpm",
-  ["exec", "next", "dev", "--port", APP_PORT],
+  process.execPath,
+  [NEXT, "dev", "--port", APP_PORT],
   { cwd: ROOT, env, stdio: "inherit" },
 );
 

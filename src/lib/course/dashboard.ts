@@ -271,3 +271,125 @@ export function getDashboard(
     matrix,
   };
 }
+
+/**
+ * Per-concept retention for several students at once.
+ *
+ * The examiner aggregate needs one number per student per concept, and used to
+ * get it by calling getDashboard once per student. Each of those calls re-reads
+ * every review in the course, so the page cost O(students x course reviews) on
+ * a synchronous driver, in the one process that also serves the students. Eight
+ * students and six hundred reviews is invisible; forty and four thousand is a
+ * hundred and sixty queries and a six-figure row count on every refresh of a
+ * page an examiner leaves open. The worst case is the large class, which is
+ * exactly who the product is for.
+ *
+ * Same arithmetic as getDashboard with the student as one more key in the map:
+ * the assessed filters, the tie-break on id, and retention divided by every
+ * question in the concept rather than by the answered ones.
+ */
+export function conceptRetentionByStudent(
+  courseId: string,
+  userIds: string[],
+  at: Date = new Date(),
+): Map<string, ConceptRetention[]> {
+  const out = new Map<string, ConceptRetention[]>();
+  if (userIds.length === 0) return out;
+
+  const course = db
+    .select()
+    .from(coursesT)
+    .where(eq(coursesT.id, courseId))
+    .get();
+  if (!course) return out;
+
+  const concepts = db
+    .select()
+    .from(conceptsT)
+    .where(and(eq(conceptsT.courseId, courseId), isNull(conceptsT.retiredAt)))
+    .all();
+  const conceptIds = concepts.map((c) => c.id);
+  if (conceptIds.length === 0) return out;
+
+  const qs = db
+    .select()
+    .from(questionsT)
+    .where(
+      and(
+        inArray(questionsT.conceptId, conceptIds),
+        isNull(questionsT.retiredAt),
+      ),
+    )
+    .all();
+
+  const assessed = course.assessmentMode === "assessed";
+  const measured = assessed ? qs.filter((q) => autoGradable(q)) : qs;
+  const measuredIds = measured.map((q) => q.id);
+
+  // The one query that replaces the per-student loop.
+  const allReviews = measuredIds.length
+    ? db
+        .select()
+        .from(reviewsT)
+        .where(
+          and(
+            inArray(reviewsT.questionId, measuredIds),
+            inArray(reviewsT.userId, userIds),
+            assessed ? ne(reviewsT.gradedBy, "self") : undefined,
+          ),
+        )
+        .orderBy(desc(reviewsT.answeredAt), desc(reviewsT.id))
+        .all()
+    : [];
+
+  // Latest review per student and question. First seen wins, because the rows
+  // arrive newest first.
+  const latest = new Map<
+    string,
+    { correct: boolean; card: StoredCard | null }
+  >();
+  for (const r of allReviews) {
+    const key = `${r.userId} ${r.questionId}`;
+    if (latest.has(key)) continue;
+    latest.set(key, {
+      correct: r.correct,
+      card: r.fsrsStateJson ? (JSON.parse(r.fsrsStateJson) as StoredCard) : null,
+    });
+  }
+
+  const titleById = new Map(concepts.map((c) => [c.id, plainText(c.title)]));
+  for (const userId of userIds) {
+    const perConcept = new Map<
+      string,
+      { total: number; retentions: number[] }
+    >();
+    for (const q of measured) {
+      const agg = perConcept.get(q.conceptId) ?? { total: 0, retentions: [] };
+      agg.total++;
+      const last = latest.get(`${userId} ${q.id}`);
+      if (last) agg.retentions.push(knowledgeHeld(last.card, last.correct, at));
+      perConcept.set(q.conceptId, agg);
+    }
+    out.set(
+      userId,
+      concepts.map((c) => {
+        const agg = perConcept.get(c.id) ?? { total: 0, retentions: [] };
+        return {
+          conceptId: c.id,
+          title: titleById.get(c.id) ?? "",
+          total: agg.total,
+          tested: agg.retentions.length,
+          retention:
+            agg.total > 0 && agg.retentions.length > 0
+              ? agg.retentions.reduce((s, r) => s + r, 0) / agg.total
+              : null,
+          // Explain-back is not part of the aggregate's question, and answering
+          // it would cost another query per student. Whoever needs it reads the
+          // student's own dashboard.
+          explained: null,
+        };
+      }),
+    );
+  }
+  return out;
+}

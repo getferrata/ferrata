@@ -66,6 +66,40 @@ const MODES: { key: Contextia; label: string; hint: string }[] = [
   { key: "off", label: "Off", hint: "No scan: text passes through untouched. Only for material you've already cleaned. Secrets can reach the model." },
 ];
 
+/** Identity of a chosen file, for keeping a list free of duplicates. */
+const fileId = (f: File): string => `${f.name}:${f.size}:${f.lastModified}`;
+
+/**
+ * Add a new selection to what is already chosen, rather than replacing it.
+ *
+ * A file input reports only the files picked in that one dialogue, so assigning
+ * it straight to state throws away everything chosen before. Somebody who picks
+ * six documents, then opens the dialogue again for a seventh, ends up with one,
+ * and nothing on screen says the other six are gone until they read the count.
+ * Adding one file at a time is the normal way to use this, not the exception.
+ */
+/**
+ * Takes an array, never the live FileList it came from.
+ *
+ * A FileList is a view onto the input element, not a copy. The updater below
+ * runs when React applies the state change, which is after the handler
+ * returns, and the handler clears the input on its way out so the same file
+ * can be picked twice. Reading the list lazily therefore read it empty, and
+ * the pick was dropped: intermittently, because it depended on whether React
+ * flushed before or after that line. Snapshot it in the handler instead.
+ */
+function merge(existing: File[], incoming: readonly File[]): File[] {
+  if (incoming.length === 0) return existing;
+  const seen = new Set(existing.map(fileId));
+  const added = incoming.filter((f) => !seen.has(fileId(f)));
+  return added.length === 0 ? existing : [...existing, ...added];
+}
+
+/** A FileList read now, not whenever somebody gets round to it. */
+function snapshot(list: FileList | null): File[] {
+  return list ? Array.from(list) : [];
+}
+
 export default function CreatePage() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
@@ -215,7 +249,6 @@ export default function CreatePage() {
             </label>
             <textarea
               id="prompt"
-              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -261,7 +294,17 @@ export default function CreatePage() {
               type="file"
               multiple
               accept=".txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.log"
-              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+              onChange={(e) => {
+                const picked = snapshot(e.target.files);
+                setFiles((prev) => merge(prev, picked));
+                // Cleared so picking the same file twice fires onChange again,
+                // which it otherwise would not: the input keeps its value and a
+                // second identical pick looks like nothing happened. This is
+                // also why `picked` is read above rather than inside the
+                // updater: clearing the value empties the list the updater
+                // would have read.
+                e.target.value = "";
+              }}
               aria-describedby="files-desc"
               className="peer sr-only"
             />
@@ -275,8 +318,9 @@ export default function CreatePage() {
               onDrop={(e) => {
                 e.preventDefault();
                 setDragging(false);
-                if (e.dataTransfer.files?.length) {
-                  setFiles(Array.from(e.dataTransfer.files));
+                const dropped = snapshot(e.dataTransfer.files);
+                if (dropped.length > 0) {
+                  setFiles((prev) => merge(prev, dropped));
                 }
               }}
               className={
@@ -300,12 +344,26 @@ export default function CreatePage() {
               <ul className="mt-3 flex flex-col gap-1.5">
                 {files.map((f) => (
                   <li
-                    key={f.name}
+                    key={fileId(f)}
                     className="flex items-center justify-between gap-2 rounded border border-border bg-surface px-3 py-2 text-step--1"
                   >
                     <span className="min-w-0 truncate text-text">{f.name}</span>
-                    <span className="shrink-0 font-mono text-text-muted">
-                      {(f.size / 1024).toFixed(0)} KB
+                    <span className="flex shrink-0 items-center gap-3">
+                      <span className="font-mono text-text-muted">
+                        {(f.size / 1024).toFixed(0)} KB
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFiles((prev) =>
+                            prev.filter((p) => fileId(p) !== fileId(f)),
+                          )
+                        }
+                        aria-label={`Remove ${f.name}`}
+                        className="rounded px-1 text-text-muted transition hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                      >
+                        &times;
+                      </button>
                     </span>
                   </li>
                 ))}

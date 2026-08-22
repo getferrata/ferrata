@@ -16,10 +16,17 @@ export const runtime = "nodejs";
  * dialog; neither is a side effect to discover later.
  */
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string; moduleId: string }> },
 ): Promise<NextResponse> {
   const { id, moduleId } = await params;
+  // Optional: rewrite against the questions this concept's readers get wrong.
+  // A flag rather than the default, because on a module nobody has answered
+  // there is no signal and the rewrite should not pretend there is.
+  const body = (await req.json().catch(() => null)) as {
+    useFailures?: unknown;
+  } | null;
+  const useFailures = body?.useFailures === true;
 
   const me = await getCurrentUser();
   if (!me || me.role !== "examiner") {
@@ -47,7 +54,12 @@ export async function POST(
 
   // Deduplicated against a rewrite already in flight for this concept, whether
   // it was queued here or by an approved proposal.
-  const queued = enqueueRegenerateModuleOnce(id, row.conceptId, me.id);
+  const queued = enqueueRegenerateModuleOnce(
+    id,
+    row.conceptId,
+    me.id,
+    useFailures,
+  );
   return NextResponse.json(
     { ok: true, alreadyQueued: !queued },
     { status: 202 },

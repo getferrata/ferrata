@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { wait } from "./timeouts";
 
 /**
  * Linked knowledge bases, end to end against a real multi-page wiki fixture:
@@ -11,17 +12,17 @@ test.use({ storageState: "e2e/.artifacts/examiner.json" });
 const WIKI = "http://127.0.0.1:4646";
 
 async function ridePipelineToReady(page: import("@playwright/test").Page) {
-  await page.waitForURL(/\/courses\//, { timeout: 30_000 });
+  await page.waitForURL(/\/courses\//, { timeout: wait(30) });
   await expect(
     page.getByRole("heading", { name: "A few questions" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
   await page.getByRole("button", { name: /Continue/ }).click();
   await expect(
     page.getByRole("heading", { name: "Review the plan before building" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
   await page.getByRole("button", { name: /Build the modules/ }).click();
   await expect(page.getByRole("heading", { name: "The route" })).toBeVisible({
-    timeout: 90_000,
+    timeout: wait(90),
   });
 }
 

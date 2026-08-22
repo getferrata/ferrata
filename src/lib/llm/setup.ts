@@ -31,7 +31,7 @@ export async function ollamaReachable(): Promise<boolean> {
   const base = (
     process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434"
   ).replace(/\/$/, "");
-  let ok = false;
+  let ok;
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);

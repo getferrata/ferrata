@@ -28,6 +28,11 @@ describe("pre-build course estimate", () => {
   it("counts the stages that only run once, including the two at the end", () => {
     // The base used to price intake and little else, so the schedule and the
     // glossary were quoted at nothing at all.
+    //
+    // It now sits deliberately above what that course billed: the planning
+    // stages read 14000 characters of material where they read 3500, and three
+    // of the five carry that overview. Quoting the old figure would be quoting
+    // a pipeline that no longer exists.
     const est = estimateCourseCost("anthropic", "claude-sonnet-5");
     expect(est.baseUsd).toBeGreaterThan(MEASURED.baseUsd * 0.9);
     expect(est.baseUsd).toBeLessThan(MEASURED.baseUsd * 1.3);

@@ -21,13 +21,26 @@ export interface DelimitedOutput {
   body: string;
 }
 
-/** Split at the first marker, or null when the model did not use the format. */
+/**
+ * The marker only counts on a line of its own.
+ *
+ * A plain search would match the string anywhere, including inside a code
+ * block, and the text being parsed is downstream of somebody's uploaded
+ * material. A document that happens to contain `---BODY---`, which is not
+ * exotic for anything describing a message format, can carry it into a module
+ * body; the concreteness pass then re-emits that body, and the split lands on
+ * the content's marker instead of the model's. Nothing is compromised, but the
+ * damage shows up on one course, once, and never reproduces.
+ */
+const BODY_LINE = /^---BODY---[ \t]*$/m;
+
+/** Split at the first marker line, or null when the model did not use the format. */
 export function splitAtBody(text: string): DelimitedOutput | null {
-  const idx = text.indexOf(BODY_DELIMITER);
-  if (idx === -1) return null;
+  const m = BODY_LINE.exec(text);
+  if (!m) return null;
   return {
-    head: text.slice(0, idx),
-    body: text.slice(idx + BODY_DELIMITER.length).trim(),
+    head: text.slice(0, m.index),
+    body: text.slice(m.index + m[0].length).trim(),
   };
 }
 

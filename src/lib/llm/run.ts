@@ -8,14 +8,17 @@ import { extractJson } from "./json";
 import { estimateCostUsd, isPriceKnown } from "./cost";
 import { resolveTask, type TaskName } from "./registry";
 import { currentActor } from "./actor";
-import { assertWithinLimit, creditsFor } from "./credits";
+import { assertWithinLimit, creditsFor, reserveCredits } from "./credits";
 import {
   LlmCallError,
+  systemText,
   type LlmCompletion,
   type LlmCompletionRequest,
   type LlmMessage,
   type LlmProvider,
+  type LlmSystem,
 } from "./provider";
+import { traceCall, tracing } from "./trace";
 
 const log = getLogger("llm");
 
@@ -51,12 +54,61 @@ async function completeWithBackoff(
   }
 }
 
+/**
+ * Output tokens assumed for a stage that names no cap of its own. Only ever
+ * used for the pre-call reservation, never to limit anything.
+ */
+const DEFAULT_OUTPUT_ESTIMATE = 4_000;
+
+/**
+ * Roughly how many input tokens a prompt is worth, at the usual four
+ * characters per token.
+ *
+ * Deliberately crude. This feeds the credit reservation held for the seconds a
+ * call is in flight, and it is replaced by the provider's real token count the
+ * moment the call returns. Being approximately right for that window is the
+ * whole requirement; a tokenizer per provider would be a dependency bought for
+ * nothing.
+ */
+function estimateTokens(system: LlmSystem, messages: LlmMessage[]): number {
+  const chars =
+    systemText(system).length +
+    messages.reduce((n, m) => n + m.content.length, 0);
+  return Math.ceil(chars / 4);
+}
+
 /** Simple {{name}} interpolation for prompt templates. */
 function render(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key: string) => {
     if (!(key in vars)) throw new Error(`Prompt variable missing: ${key}`);
     return vars[key] ?? "";
   });
+}
+
+/**
+ * The line a prompt uses to say where it stops being the same on every call.
+ * Everything above it is the cache prefix; everything below changes per call.
+ */
+export const PER_CALL_MARKER = "---PER-CALL---";
+
+/**
+ * Split a rendered prompt at its marker.
+ *
+ * The marker is also the opt-in: a prompt without one is sent as a plain string
+ * and no cache is asked for. That default is deliberate rather than lazy. A
+ * cache write costs a quarter more than an uncached call and only pays back
+ * when something reads it, so switching caching on for a stage that runs once
+ * per course, as intake and the glossary do, would make the course dearer while
+ * looking like an optimisation. Only the stages that run once per module carry
+ * the marker.
+ */
+export function splitPrompt(rendered: string): LlmSystem {
+  const at = rendered.indexOf(PER_CALL_MARKER);
+  if (at === -1) return rendered;
+  return {
+    stable: rendered.slice(0, at).trimEnd(),
+    perCall: rendered.slice(at + PER_CALL_MARKER.length).trimStart(),
+  };
 }
 
 export interface RunStructuredOptions<T> {
@@ -84,6 +136,17 @@ export interface RunStructuredOptions<T> {
   jsonMode?: boolean;
   /** How to turn completion text into the value to validate. Default: JSON. */
   parse?: (text: string) => unknown;
+  /**
+   * A last pass over the parsed value before it meets the schema, for shapes a
+   * model gets wrong in ways that are unambiguous to correct.
+   *
+   * Per task rather than global: what is safe to rewrite depends entirely on
+   * what the field means, and a blanket coercion would turn a real defect into
+   * a silent one somewhere else. Whatever it changes is logged, since a model
+   * drifting further off spec each week must not look like a model that is
+   * fine.
+   */
+  repair?: (parsed: unknown) => { value: unknown; notes: string[] };
   /** Name of the output format, used in repair prompts. Default "JSON". */
   formatName?: string;
 }
@@ -98,7 +161,7 @@ export async function runStructuredTask<T>(
 ): Promise<T> {
   const { provider, providerName, model } = resolveTask(opts.task);
   const template = await readFile(opts.promptPath, "utf8");
-  const system = render(template, opts.vars);
+  const system = splitPrompt(render(template, opts.vars));
 
   const actorId = currentActor()?.userId ?? null;
   const maxRetries = opts.maxRetries ?? 2;
@@ -115,14 +178,34 @@ export async function runStructuredTask<T>(
     // Checked on every attempt, not once: a long repair loop must not be able
     // to walk past the ceiling one retry at a time.
     assertWithinLimit(actorId);
+    // What this attempt is expected to cost, held against the actor until the
+    // real figure lands in the ledger below. It is what makes the check above
+    // true for the calls running beside this one rather than only for the ones
+    // that have already finished.
+    const release = reserveCredits(
+      actorId,
+      creditsFor(
+        estimateCostUsd(
+          providerName,
+          model,
+          estimateTokens(system, messages),
+          opts.maxTokens ?? DEFAULT_OUTPUT_ESTIMATE,
+        ),
+      ),
+    );
     const startedAt = now();
     let ok = false;
     let tokensIn = 0;
     let tokensOut = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
     // Why this attempt was thrown away, for the ledger row below. Per attempt,
     // not shared with lastError: a discarded call has to carry its own reason
     // or the receipt says a third of a course was wasted without saying on what.
     let reason: string | null = null;
+    // Held only so the trace below can see it. Empty when the call never
+    // returned, which is itself worth recording.
+    let responseText = "";
     try {
       const completion = await completeWithBackoff(
         provider,
@@ -135,10 +218,22 @@ export async function runStructuredTask<T>(
         },
         model,
       );
+      responseText = completion.text;
       tokensIn = completion.usage.tokensIn;
       tokensOut = completion.usage.tokensOut;
+      cacheReadTokens = completion.usage.cacheReadTokens ?? 0;
+      cacheWriteTokens = completion.usage.cacheWriteTokens ?? 0;
 
-      const parsed = parse(completion.text);
+      let parsed = parse(completion.text);
+      if (opts.repair) {
+        const repaired = opts.repair(parsed);
+        parsed = repaired.value;
+        if (repaired.notes.length > 0) {
+          log.warn(
+            `Task "${opts.task}" output was repaired rather than retried: ${repaired.notes.join("; ")}`,
+          );
+        }
+      }
       const result = opts.schema.safeParse(parsed);
       if (!result.success) {
         lastError = result.error.issues
@@ -198,7 +293,10 @@ export async function runStructuredTask<T>(
       // Transport errors are not repairable by re-prompting; rethrow last one.
       if (attempt === maxRetries) throw err;
     } finally {
-      const costUsd = estimateCostUsd(providerName, model, tokensIn, tokensOut);
+      const costUsd = estimateCostUsd(providerName, model, tokensIn, tokensOut, {
+        readTokens: cacheReadTokens,
+        writeTokens: cacheWriteTokens,
+      });
       db.insert(llmCalls)
         .values({
           priceKnown: isPriceKnown(providerName, model),
@@ -210,6 +308,8 @@ export async function runStructuredTask<T>(
           model,
           tokensIn,
           tokensOut,
+          cacheReadTokens,
+          cacheWriteTokens,
           costUsd,
           credits: creditsFor(costUsd),
           latencyMs: now() - startedAt,
@@ -217,6 +317,31 @@ export async function runStructuredTask<T>(
           error: ok ? null : reason,
         })
         .run();
+      // Written after the ledger and only when an operator asked for it. This
+      // is the half the ledger cannot hold: what was said, rather than what it
+      // cost to say it. Never allowed to interrupt the build.
+      if (tracing()) {
+        traceCall({
+          task: opts.task,
+          provider: providerName,
+          model,
+          courseId: opts.courseId ?? null,
+          userId: actorId,
+          attempt,
+          system: systemText(system),
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          response: responseText,
+          tokensIn,
+          tokensOut,
+          costUsd,
+          ok,
+          reason: ok ? null : reason,
+          at: startedAt,
+        });
+      }
+      // After the ledger row, never before: releasing first would leave a gap
+      // in which this call is accounted for by neither.
+      release();
     }
   }
 

@@ -13,17 +13,25 @@ import type { GlossaryTerm } from "@/lib/glossary-terms";
  */
 const marked = new Marked({ gfm: true, breaks: false });
 
+/**
+ * The only src an image in a module body may have: this install's own figure
+ * route, on a course id and a figure id and nothing else. Anchored at both
+ * ends, so no query string, no fragment, and nothing before the path.
+ */
+const LOCAL_FIGURE = /^\/api\/courses\/[A-Za-z0-9_-]+\/figures\/[A-Za-z0-9_-]+$/;
+
 const SANITIZE_OPTS: sanitizeHtml.IOptions = {
   allowedTags: [
     "h1", "h2", "h3", "h4", "h5", "h6",
     "p", "blockquote", "hr", "br",
     "ul", "ol", "li",
     "strong", "em", "del", "code", "pre",
-    "a", "span", "abbr",
+    "a", "span", "abbr", "img", "figure", "figcaption",
     "table", "thead", "tbody", "tr", "th", "td",
   ],
   allowedAttributes: {
     a: ["href", "title"],
+    img: ["src", "alt", "loading", "decoding"],
     abbr: ["class", "title"],
     code: ["class"],
     pre: ["class", "tabindex", "role", "aria-label"],
@@ -36,6 +44,34 @@ const SANITIZE_OPTS: sanitizeHtml.IOptions = {
   // Scrollable regions (wide tables, ASCII diagrams) must be keyboard-reachable
   // (WCAG 2.1.1). Make them focusable and announced as regions.
   transformTags: {
+    // An image is allowed only when it points at this install's own figure
+    // route. Anything else becomes an empty span.
+    //
+    // The rule is not about markup, it is about who gets told that somebody is
+    // reading. A course is a file people pass around and import, and a body
+    // holding <img src="https://someone-else/pixel.png"> would call that host
+    // every time a module is opened, reporting the reader's address and the
+    // moment they read it. A data: URI is refused for a plainer reason: it is
+    // bytes nobody approved, inlined into a page.
+    img: (tagName, attribs) => {
+      const src = attribs.src ?? "";
+      if (!LOCAL_FIGURE.test(src)) {
+        // The annotation is load-bearing: the attribute map is indexed by
+        // string, and an empty literal without it infers every key as
+        // undefined. eslint --fix removed it once and broke the build.
+        const none: Record<string, string> = {};
+        return { tagName: "span", attribs: none };
+      }
+      return {
+        tagName,
+        attribs: {
+          src,
+          alt: attribs.alt ?? "",
+          loading: "lazy",
+          decoding: "async",
+        },
+      };
+    },
     table: sanitizeHtml.simpleTransform("table", {
       tabindex: "0",
       role: "region",
@@ -218,8 +254,13 @@ function restoreProtected(html: string, restorations: Restoration[]): string {
   }
   return html.replace(CXT_TOKEN_RE, (raw, hash: string) => {
     const r = byHash.get(hash);
-    if (r) return cxtSpan(r.label, r.value);
-    return `<span class="cxt" title="value protected by Contextia">&#8226;&#8226;&#8226;</span>`;
+    // An empty value is not a value. It means the row is sealed and the key
+    // that opens it is not set, and substituting it would delete the word from
+    // the sentence: "reach  from the jump host" reads as a typo rather than as
+    // something withheld, and nobody goes looking for a gap they cannot see.
+    if (r && r.value !== "") return cxtSpan(r.label, r.value);
+    const label = r ? `${r.label}: needs FERRATA_SECRET_KEY to show` : "value protected by Contextia";
+    return `<span class="cxt" title="${escapeAttr(label)}">&#8226;&#8226;&#8226;</span>`;
   });
 }
 

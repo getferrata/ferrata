@@ -11,8 +11,9 @@ import { requireUser } from "@/lib/auth/session";
 import { canSeeCourse } from "@/lib/course/access";
 import { studentDeadline } from "@/lib/course/invite";
 import { pendingProposals } from "@/lib/course/proposals";
-import { jobs } from "@/db/schema";
-import { eq as eqJobs } from "drizzle-orm";
+import { courseGaps } from "@/lib/course/gaps";
+import { listFigures } from "@/lib/sources/figures";
+import { courseWork } from "@/lib/course/work";
 import { PipelineProgress } from "./progress";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +46,11 @@ export default async function CoursePage({
     (!bundle.course.ownerId || bundle.course.ownerId === user.id);
 
   if (bundle.course.status === "ready") {
+    // One read of the work queue, used three ways: the panel that says what is
+    // running, the marks on the route rows being rewritten, and the flag the
+    // proposals panel already had. Asking three times would be three scans of
+    // the same table on every render of a page that never caches.
+    const work = canEdit ? courseWork(id) : null;
     let resume: { moduleId: string; title: string } | null = null;
     if (user.role === "student") {
       const enr = db
@@ -89,7 +95,23 @@ export default async function CoursePage({
                 }))
               : []
           }
-          analysing={canEdit ? analysingCourse(id) : false}
+          gaps={canEdit ? courseGaps(id) : null}
+          figures={
+            canEdit
+              ? listFigures(id).map((f) => ({
+                  id: f.id,
+                  width: f.width,
+                  height: f.height,
+                  bytes: f.bytes,
+                  altText: f.altText,
+                  status: f.status,
+                }))
+              : []
+          }
+          work={work}
+          analysing={
+            work?.active.some((a) => a.type === "propose_updates") ?? false
+          }
           userId={user.role === "student" ? user.id : undefined}
           deadline={
             user.role === "student" ? studentDeadline(id, user.id) : null
@@ -123,18 +145,4 @@ function verifierName(userId: string | null): string | null {
     .where(eq(users.id, userId))
     .get();
   return row?.name ?? "someone here";
-}
-
-/** True while a propose_updates job for this course is queued or running. */
-function analysingCourse(courseId: string): boolean {
-  return db
-    .select({ status: jobs.status, payloadJson: jobs.payloadJson })
-    .from(jobs)
-    .where(eqJobs(jobs.type, "propose_updates"))
-    .all()
-    .some(
-      (j) =>
-        (j.status === "queued" || j.status === "running") &&
-        j.payloadJson.includes(`"${courseId}"`),
-    );
 }

@@ -8,6 +8,11 @@ import { ExportButton } from "./export-button";
 import { AssessmentToggle } from "./assessment-toggle";
 import { AddMaterial } from "./add-material";
 import { ProposedUpdates, type ProposalView } from "./proposed-updates";
+import { CourseGapsPanel } from "./course-gaps";
+import { CourseFiguresPanel, type FigureView } from "./course-figures";
+import { CourseWorkPanel } from "./course-work";
+import type { CourseGaps } from "@/lib/course/gaps";
+import type { CourseWork } from "@/lib/course/work";
 import { DeleteCourse } from "./delete-course";
 import { CourseReceipt } from "./course-receipt";
 import { ConceptGraph } from "./concept-graph";
@@ -27,6 +32,9 @@ export function CourseOverview({
   canVerify = false,
   canEdit = false,
   proposals = [],
+  gaps = null,
+  figures = [],
+  work = null,
   analysing = false,
   deadline,
   resume,
@@ -39,6 +47,12 @@ export function CourseOverview({
   canEdit?: boolean;
   /** Pending proposals from newly added material (owner examiner only). */
   proposals?: ProposalView[];
+  /** What the finished build did not manage to write (owner examiner only). */
+  gaps?: CourseGaps | null;
+  /** Pictures found in the material, awaiting the author's decision. */
+  figures?: FigureView[];
+  /** What the worker owes this course right now (owner examiner only). */
+  work?: CourseWork | null;
   /** True while a propose_updates job for this course is queued or running. */
   analysing?: boolean;
   deadline?: number | null;
@@ -46,6 +60,7 @@ export function CourseOverview({
   resume?: { moduleId: string; title: string } | null;
 }) {
   const { course, modules, cuts, sources, edges } = bundle;
+  const rewriting = new Set(work?.rewriting ?? []);
   const okSources = sources.filter((s) => s.status === "ok");
   const due = getDueSummary(course.id, Date.now(), userId);
   const canReview = due.due + due.newCount > 0;
@@ -108,6 +123,8 @@ export function CourseOverview({
           <span>Time budget: {Math.round(course.budgetMinutes / 60)} h</span>
         ) : null}
       </div>
+
+      {work ? <CourseWorkPanel work={work} /> : null}
 
       {resume ? (
         <Link
@@ -181,6 +198,14 @@ export function CourseOverview({
                     {m.concept.summary}
                   </p>
                   <div className="mt-2 flex items-center gap-4">
+                    {rewriting.has(m.concept.id) ? (
+                      // Which module, not just that something is running: the
+                      // panel above says a rewrite is in flight, this says
+                      // whose body and tests are about to change under you.
+                      <span className="text-step--1 text-accent">
+                        being rewritten
+                      </span>
+                    ) : null}
                     {m.module ? (
                       <>
                         <StateChip state="untested" />
@@ -419,6 +444,14 @@ export function CourseOverview({
           ) : null}
         </aside>
       </div>
+
+      {canEdit && gaps ? (
+        <CourseGapsPanel courseId={course.id} gaps={gaps} />
+      ) : null}
+
+      {canEdit ? (
+        <CourseFiguresPanel courseId={course.id} figures={figures} />
+      ) : null}
 
       {canEdit ? (
         <ProposedUpdates

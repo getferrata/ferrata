@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth/session";
 import { canSeeCourse } from "@/lib/course/access";
 import { SiteHeader } from "@/components/site-header";
 import { KnowledgeMatrix } from "@/components/knowledge-matrix";
+import { RewriteFromFailures } from "@/components/rewrite-from-failures";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "What you actually know" };
@@ -342,12 +343,38 @@ function ExaminerView({ id, agg }: { id: string; agg: CourseAggregate }) {
                   {agg.weakForMany.map((w) => (
                     <li
                       key={w.conceptId}
-                      className="flex items-baseline justify-between gap-3 rounded border border-border px-3 py-2"
+                      className="rounded border border-border px-3 py-2"
                     >
-                      <span className="text-step-0 text-text">{w.title}</span>
-                      <span className="text-step--1 text-text-muted">
-                        weak for {w.weakStudents} of {agg.measuredStudents}
-                      </span>
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-2">
+                        <span className="text-step-0 text-text">{w.title}</span>
+                        <span className="text-step--1 text-text-muted">
+                          weak for {w.weakStudents} of {agg.measuredStudents}
+                          {w.failedQuestions > 0 ? (
+                            <>
+                              {" "}
+                              · {w.failedQuestions}{" "}
+                              {w.failedQuestions === 1
+                                ? "question"
+                                : "questions"}{" "}
+                              most of them fail
+                            </>
+                          ) : null}
+                        </span>
+                      </div>
+                      {/* Offered only when there is something to rewrite
+                          against. Weak by the spacing model's reckoning with
+                          no failed question behind it means the class has not
+                          been tested enough to say what the module gets wrong,
+                          and a rewrite from nothing is a bill, not a fix. */}
+                      {w.moduleId && w.failedQuestions > 0 ? (
+                        <div className="mt-2">
+                          <RewriteFromFailures
+                            courseId={id}
+                            moduleId={w.moduleId}
+                            failedQuestions={w.failedQuestions}
+                          />
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

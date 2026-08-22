@@ -5,6 +5,7 @@ import {
 } from "@sbr0nch/contextia-engine";
 import { createHmac, randomBytes } from "node:crypto";
 import { getSetting, setSetting } from "@/lib/settings";
+import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES } from "./well-known";
 
 /**
  * DLP gate, backed by Contextia (on-device secret/PII detection). Source text
@@ -58,10 +59,16 @@ export function resolveMode(explicit?: ContextiaMode): ContextiaMode {
   return MODE_RANK[explicit] >= MODE_RANK[floor] ? explicit : floor;
 }
 function allowValues(): string[] {
-  return (process.env.CONTEXTIA_ALLOW ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return [
+    // Published constants come first and are not the operator's to remove:
+    // protecting them protects nothing and breaks any course that teaches
+    // networking. See well-known.ts for what qualifies.
+    ...WELL_KNOWN_VALUES,
+    ...(process.env.CONTEXTIA_ALLOW ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ];
 }
 
 // The default detectors PLUS the restorable ones (which ship default-disabled):
@@ -211,7 +218,7 @@ export async function scanSensitivity(
   // Treating that as clean would send the unscanned tail straight to the model.
   const { findings, truncated, scannedLength } = detectDetailed(text, {
     enabledDetectors: ENABLED_DETECTORS,
-    allowlist: { values: allowValues() },
+    allowlist: { values: allowValues(), patterns: [...WELL_KNOWN_PATTERNS] },
   });
   if (truncated) {
     return {

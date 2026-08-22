@@ -28,6 +28,32 @@ describe("verifyModule", () => {
     expect(v.hard).toEqual([]);
   });
 
+  it("flags a second delimiter in the body (hard)", () => {
+    // Taken from a real 7B module. It wrote a module, emitted the marker again
+    // and wrote a different one; the split takes the first marker, so both
+    // shipped and the student reads the module twice, the second time as raw
+    // markdown in a code fence.
+    const body = [
+      GOOD_BODY,
+      "",
+      "---BODY---",
+      "```markdown",
+      "## Edge Gateway, Operations Runbook",
+      "It terminates TLS for all inbound traffic.",
+      "```",
+    ].join("\n");
+    const v = verifyModule({ bodyMd: body, sources: [], depthLevel: 1 });
+    expect(v.hard.join(" ")).toContain("another \"---BODY---\" line");
+  });
+
+  it("does not flag the marker mentioned inside a line", () => {
+    // The split only honours it on a line of its own, and a module explaining
+    // the format is allowed to name it.
+    const body = `${GOOD_BODY}\n\nThe reply is a TITLE line, then ---BODY---, then markdown.`;
+    const v = verifyModule({ bodyMd: body, sources: [], depthLevel: 1 });
+    expect(v.hard).toEqual([]);
+  });
+
   it("flags a citation that names an unprovided source (hard)", () => {
     const body = `${GOOD_BODY}\n\nSee [source: made-up.md] for detail.`;
     const v = verifyModule({

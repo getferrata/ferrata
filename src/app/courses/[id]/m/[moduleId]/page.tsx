@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCourseBundle } from "@/lib/course/query";
 import { renderMarkdown } from "@/lib/md";
+import { renderFigureTokens } from "@/lib/sources/figures";
 import { parseGlossaryTerms } from "@/lib/glossary-terms";
 import { SiteHeader } from "@/components/site-header";
 import { requireUser } from "@/lib/auth/session";
@@ -13,7 +14,7 @@ import { toClientQuestion } from "@/lib/review/grade";
 import { EditModule } from "@/components/edit-module";
 import { RegenerateModule } from "@/components/regenerate-module";
 import { ModuleRewriting } from "@/components/module-rewriting";
-import { moduleRewriteInFlight } from "@/lib/jobs/queue";
+import { moduleWork } from "@/lib/course/work";
 import { MarkPosition } from "@/components/mark-position";
 import { FeynmanPanel } from "@/components/feynman-panel";
 import { VideoAnnex } from "@/components/video-annex";
@@ -55,9 +56,14 @@ export default async function ModulePage({
 
   // A rewrite (from a proposal approval or the button below) runs in the
   // background and swaps this module in place. Surface it so the reader is not
-  // staring at the old body wondering when it changes.
-  const rewriting =
-    viewer.role === "examiner" && moduleRewriteInFlight(view.concept.id);
+  // staring at the old body wondering when it changes, and surface a failed one
+  // too: a rewrite that stopped leaves exactly the page a rewrite that never
+  // started leaves, and the author has no way to tell which they are looking at.
+  const rework =
+    viewer.role === "examiner"
+      ? moduleWork(view.concept.id)
+      : ({ state: "idle" } as const);
+  const rewriting = rework.state === "queued" || rework.state === "running";
 
   // Prerequisite modules of THIS concept, as quick jump-back links (so a reader
   // who feels shaky can revisit what came before). Only those with a real module.
@@ -131,12 +137,15 @@ export default async function ModulePage({
           </details>
         ) : null}
 
-        <ModuleRewriting rewriting={rewriting} />
+        <ModuleRewriting work={rework} />
 
         <article
           className="reading-prose mt-8"
           dangerouslySetInnerHTML={{
-            __html: renderMarkdown(view.module.bodyMd, {
+            // Figure tokens become images here rather than in the stored body:
+            // approving or withdrawing a picture then changes what readers see
+            // without rewriting what the model wrote.
+            __html: renderMarkdown(renderFigureTokens(id, view.module.bodyMd), {
               glossary: parseGlossaryTerms(bundle.course.glossaryMd),
               restorations: bundle.restorations,
               sources: bundle.sources.map((s) => s.name),

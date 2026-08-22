@@ -5,6 +5,7 @@ import { packages } from "@/db/schema";
 import { newId, now } from "@/lib/util/id";
 import type { CourseBundle } from "@/lib/course/query";
 import { buildPackage, type FerrataPackage } from "./format";
+import { exportableFigures } from "@/lib/sources/figures";
 
 export function slug(s: string): string {
   return (
@@ -77,6 +78,7 @@ export async function writePackage(
     author: opts.author ?? null,
     license: opts.license ?? null,
     exportedAt: now(),
+    figures: exportableFigures(bundle.course.id),
   });
   const base = slug(bundle.course.title);
   const dir = resolve(baseDir, `${base}.ferrata`);

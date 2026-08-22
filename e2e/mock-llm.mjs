@@ -39,7 +39,15 @@ const MODULE_BODY = [
   "Nothing before it; failover sits next to it.",
 ].join("\n");
 
-function respond(system) {
+/**
+ * The phrase the overview fixture buries deep inside a file whose first
+ * paragraphs are boilerplate. Seeing it here means the passage the brief asked
+ * about reached the planner, rather than the top of the file that happened to
+ * be ingested first.
+ */
+const DEEP_MARKER = "circuit breaker at the payment edge";
+
+function respond(system, material) {
   if (system.includes("authoring-interview stage")) {
     return {
       questions: [
@@ -49,6 +57,20 @@ function respond(system) {
     };
   }
   if (system.includes("intake stage")) {
+    // A fourth concept, added only when the buried passage is in front of it.
+    // Nothing else in the suite attaches that phrase, so every other course
+    // still plans exactly three.
+    const deep = material.includes(DEEP_MARKER)
+      ? [
+          {
+            title: "The payment circuit breaker",
+            summary: "It opens before the pool empties.",
+            priority: "high",
+            estimatedMinutes: 20,
+            depthLevel: 2,
+          },
+        ]
+      : [];
     return {
       title: "Acme edge onboarding",
       lang: "en",
@@ -62,6 +84,7 @@ function respond(system) {
         { title: "The edge gateway", summary: "The single front door: TLS and routing.", priority: "critical", estimatedMinutes: 30, depthLevel: 2 },
         { title: "Reading a 503", summary: "Empty pool, not broken gateway.", priority: "critical", estimatedMinutes: 30, depthLevel: 3 },
         { title: "Failover", summary: "VRRP moves the VIP in seconds.", priority: "high", estimatedMinutes: 20, depthLevel: 2 },
+        ...deep,
       ],
     };
   }
@@ -79,8 +102,19 @@ function respond(system) {
     return `TITLE: Module\n---BODY---\n${MODULE_BODY}`;
   }
   if (system.includes("concreteness pass")) {
-    // Delimiter format here too, for the same reason as the writing stage.
-    return `NOTES:\n- named the pool the runbook names\n---BODY---\n${MODULE_BODY}`;
+    // Edits, not the module again. The find has to be text the body really
+    // contains, so the app exercises the real apply path rather than a stub
+    // that always matches.
+    return {
+      edits: [
+        {
+          find: "the single front door",
+          replace: "the single front door (one box, edge-01, in rack 4)",
+          why: "named the machine and where it sits",
+        },
+      ],
+      notes: [],
+    };
   }
   if (system.includes("quality judge")) {
     return { pass: true, score: 0.92, issues: [], specificityViolations: [] };
@@ -195,14 +229,23 @@ const server = http.createServer((req, res) => {
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     let system = "";
+    let material = "";
     try {
       const parsed = JSON.parse(body);
-      const sys = (parsed.messages ?? []).find((m) => m.role === "system");
-      system = sys?.content ?? "";
+      const messages = parsed.messages ?? [];
+      system = messages.find((m) => m.role === "system")?.content ?? "";
+      // Imported material rides in its own user turn, never in the system
+      // prompt. Reading it separately here keeps the mock honest about that
+      // boundary: a fixture that only reached the system prompt would not be
+      // seen, which is the assertion the DEEP_MARKER checks depend on.
+      material = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => m.content ?? "")
+        .join("\n");
     } catch {
       // fall through with empty system
     }
-    const payload = respond(system);
+    const payload = respond(system, material);
     // A task that speaks a delimiter format (write_module) returns a raw string;
     // everything else returns an object serialised as JSON.
     const content = typeof payload === "string" ? payload : JSON.stringify(payload);

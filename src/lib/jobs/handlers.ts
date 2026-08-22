@@ -11,8 +11,10 @@ import {
   type DepthPreset,
 } from "@/db/schema";
 import { newId, now } from "@/lib/util/id";
+import { mapWithConcurrency } from "@/lib/util/pool";
 import { getLogger } from "@/lib/log";
 import { enqueue } from "./queue";
+import { moduleConcurrency } from "./concurrency";
 import { currentActor } from "@/lib/llm/actor";
 
 const log = getLogger("pipeline");
@@ -28,7 +30,10 @@ import {
   verifyModule,
   type RepairRequest,
 } from "@/lib/llm/tasks/write_module";
-import { runConcretenessPass } from "@/lib/llm/tasks/concreteness_pass";
+import {
+  runConcretenessPass,
+  editsAreTrustworthy,
+} from "@/lib/llm/tasks/concreteness_pass";
 import { looksTruncated } from "@/lib/llm/truncation";
 import { runWriteQuestions } from "@/lib/llm/tasks/write_questions";
 import { runSchedule } from "@/lib/llm/tasks/schedule";
@@ -49,7 +54,13 @@ import {
 } from "@/lib/sources/query";
 import { runProposeUpdates } from "@/lib/llm/tasks/propose_updates";
 import { preflightTag, runPreflight } from "@/lib/llm/preflight";
+import { sweepSources } from "@/lib/sources/watch";
 import { recordProposals } from "@/lib/course/proposals";
+import { describeFigures } from "@/lib/sources/figures";
+import {
+  failedQuestionsForConcept,
+  rewriteNotesFromFailures,
+} from "@/lib/course/weakness";
 
 export type JobHandler = (payload: unknown) => Promise<unknown>;
 
@@ -80,7 +91,7 @@ const interviewHandler: JobHandler = async (payload) => {
   // asking the author to describe material the pipeline already has.
   const result = await runInterviewQuestions(
     course.sourcePrompt,
-    sourceOverview(loadCourseChunks(id)),
+    sourceOverview(loadCourseChunks(id), { focus: course.sourcePrompt }),
     id,
   );
   const state: InterviewState = { questions: result.questions, answers: {} };
@@ -101,7 +112,12 @@ const intakeHandler: JobHandler = async (payload) => {
   // Ground intake in the attached material so concepts reflect it, not a guess.
   // The brief is the author's own words (trusted); the attached overview is
   // imported and untrusted, so intake keeps them in separate channels.
-  const overview = sourceOverview(loadCourseChunks(id));
+  // The brief is also the query: with 131 files attached, the budget cannot
+  // show them all, and which ones it shows should be decided by what the author
+  // asked for rather than by which happened to be ingested first.
+  const overview = sourceOverview(loadCourseChunks(id), {
+    focus: course.sourcePrompt,
+  });
   const result = await runIntake(
     course.sourcePrompt,
     overview,
@@ -350,56 +366,63 @@ const generateCourseHandler: JobHandler = async (payload) => {
     concepts.filter((c) => !done.has(c.id)).map((c) => c.id),
   );
 
-  let generated = 0;
-  for (const concept of concepts) {
-    if (done.has(concept.id)) {
-      generated++;
-      continue;
-    }
-    const stored = untested.get(concept.id);
-    if (stored) {
-      try {
-        const rows = await writeQuestionRows(
-          id,
-          course,
-          concept,
-          stored.bodyMd,
-        );
-        if (rows.length > 0) {
-          db.transaction((tx) => {
-            for (const row of rows) tx.insert(questionsT).values(row).run();
-          });
-          generated++;
-          continue;
+  // Modules are written several at a time. They are independent by
+  // construction: a module is written from its own concept, the titles of its
+  // prerequisites and the retrieved material, and never from the text of
+  // another module in the same run, so nothing here waits on the module before
+  // it. The build was sequential only because it was written as a loop, and
+  // that loop was most of a twenty-minute wait.
+  const built = await mapWithConcurrency(
+    concepts,
+    moduleConcurrency(),
+    async (concept): Promise<boolean> => {
+      if (done.has(concept.id)) return true;
+
+      const stored = untested.get(concept.id);
+      if (stored) {
+        try {
+          const rows = await writeQuestionRows(id, course, concept, stored.bodyMd);
+          if (rows.length > 0) {
+            db.transaction((tx) => {
+              for (const row of rows) tx.insert(questionsT).values(row).run();
+            });
+            return true;
+          }
+          // Still no tests. Fall through and rewrite the module: a body the test
+          // writer cannot make a single question out of is itself the suspect.
+          log.warn(
+            `no tests for the stored body of "${concept.title}"; rewriting the module`,
+          );
+        } catch (err) {
+          log.error(
+            `tests-only pass for "${concept.title}" failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
-        // Still no tests. Fall through and rewrite the module: a body the test
-        // writer cannot make a single question out of is itself the suspect.
-        log.warn(
-          `no tests for the stored body of "${concept.title}"; rewriting the module`,
+      }
+
+      try {
+        return Boolean(
+          await generateOneModule(
+            id,
+            course,
+            concept,
+            prereqTitles(concept),
+            anchors,
+            index,
+          ),
         );
       } catch (err) {
+        // One module failing must not sink the whole course. Caught here rather
+        // than left to the pool for the same reason it was caught inside the
+        // loop: the other modules are still worth writing.
         log.error(
-          `tests-only pass for "${concept.title}" failed: ${err instanceof Error ? err.message : String(err)}`,
+          `generate_course: module for "${concept.title}" failed: ${err instanceof Error ? err.message : String(err)}`,
         );
+        return false;
       }
-    }
-    try {
-      const moduleId = await generateOneModule(
-        id,
-        course,
-        concept,
-        prereqTitles(concept),
-        anchors,
-        index,
-      );
-      if (moduleId) generated++;
-    } catch (err) {
-      // One module failing must not sink the whole course.
-      log.error(
-        `generate_course: module for "${concept.title}" failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+    },
+  );
+  const generated = built.filter(Boolean).length;
 
   if (generated === 0) throw new Error("generate_course: no modules generated");
 
@@ -437,7 +460,9 @@ const generateCourseHandler: JobHandler = async (payload) => {
         objective: course.objective ?? "",
         modules: concepts.map((c) => ({ title: c.title, summary: c.summary })),
         // Titles say which terms matter; the material says what they mean here.
-        sources: sourceOverview(loadCourseChunks(id)),
+        sources: sourceOverview(loadCourseChunks(id), {
+          focus: `${course.objective ?? ""} ${concepts.map((c) => c.title).join(" ")}`,
+        }),
       },
       id,
     ).catch(() => null),
@@ -500,6 +525,18 @@ const regenerateModuleHandler: JobHandler = async (payload) => {
     .map((e) => concepts.find((c) => c.id === e.fromConceptId)?.title)
     .filter((t): t is string => Boolean(t));
 
+  // Asked for from the "weak for most of the class" list: rewrite against what
+  // readers actually got wrong, rather than against nothing.
+  const fromFailures =
+    (payload as { useFailures?: unknown }).useFailures === true
+      ? rewriteNotesFromFailures(failedQuestionsForConcept(id, concept.id))
+      : [];
+  if (fromFailures.length > 0) {
+    log.info(
+      `regenerating "${concept.title}" against ${fromFailures.length} question(s) the class fails`,
+    );
+  }
+
   const moduleId = await generateOneModule(
     id,
     course,
@@ -507,6 +544,7 @@ const regenerateModuleHandler: JobHandler = async (payload) => {
     prereqs,
     anchors,
     index,
+    fromFailures,
   );
   if (!moduleId) throw new Error("regenerate_module: nothing was written");
   return { moduleId };
@@ -525,7 +563,7 @@ type QuestionRow = typeof questionsT.$inferInsert;
  */
 export async function writeQuestionRows(
   courseId: string,
-  course: { lang: string; sourcePrompt: string },
+  course: { lang: string; sourcePrompt: string; authorContextMd: string | null },
   concept: Concept,
   bodyMd: string,
 ): Promise<QuestionRow[]> {
@@ -536,6 +574,7 @@ export async function writeQuestionRows(
     bodyMd,
     depthLevel: concept.depthLevel,
     sourcePrompt: course.sourcePrompt,
+    authorContext: course.authorContextMd ?? "",
   };
   let qs = await runWriteQuestions({ ...args, count: want }, courseId).catch(
     () => null,
@@ -652,11 +691,18 @@ const LITE = process.env.FERRATA_LITE === "1";
 
 async function generateOneModule(
   id: string,
-  course: { lang: string; objective: string | null; domain: string | null; startLevel: string | null; sourcePrompt: string; concretenessRule: string | null; depthPreset: DepthPreset },
+  course: { lang: string; objective: string | null; domain: string | null; startLevel: string | null; sourcePrompt: string; authorContextMd: string | null; concretenessRule: string | null; depthPreset: DepthPreset },
   concept: Concept,
   prereqs: string[],
   anchors: string[],
   index: Bm25Index,
+  /**
+   * What this module already failed to teach, from the answers readers gave.
+   * Present only on a rewrite asked for because a class is weak on it: a first
+   * build has no readers yet, and inventing a complaint would be worse than
+   * having none.
+   */
+  openingNotes: string[] = [],
 ): Promise<string | null> {
   let best: {
     bodyMd: string;
@@ -670,8 +716,18 @@ async function generateOneModule(
   const sources = formatGrounding(grounded);
 
   // Carries the previous attempt's body plus the exact defects to fix, so a
-  // second attempt is a targeted repair rather than a blind reroll.
-  let repair: RepairRequest | undefined;
+  // second attempt is a targeted repair rather than a blind reroll. Seeded on a
+  // rewrite with what readers got wrong, so the first attempt already knows
+  // what to fix instead of rediscovering it.
+  const existingBody = db
+    .select({ bodyMd: modulesT.bodyMd })
+    .from(modulesT)
+    .where(eq(modulesT.conceptId, concept.id))
+    .get()?.bodyMd;
+  let repair: RepairRequest | undefined =
+    openingNotes.length > 0 && existingBody
+      ? { priorBody: existingBody, notes: openingNotes }
+      : undefined;
 
   const attempts = LITE ? 1 : MAX_MODULE_ATTEMPTS;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -683,6 +739,7 @@ async function generateOneModule(
         startLevel: course.startLevel ?? "",
         sourcePrompt: course.sourcePrompt,
         concretenessRule: course.concretenessRule ?? "",
+        authorContext: course.authorContextMd ?? "",
         conceptTitle: concept.title,
         conceptSummary: concept.summary,
         depthLevel: concept.depthLevel,
@@ -723,8 +780,22 @@ async function generateOneModule(
       log.warn(
         `concreteness pass for "${concept.title}" failed, shipping the draft as written: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return { bodyMd: drafted.bodyMd, notes: [] };
+      return { bodyMd: drafted.bodyMd, notes: [], applied: 0, rejected: [] };
     });
+
+    // Most of the edits missed, which means the model was working from a text
+    // it could not see properly. The ones that did land are then as likely to
+    // be wrong as the ones that did not, so the draft is the safer body.
+    if (!editsAreTrustworthy(concrete)) {
+      log.warn(
+        `concreteness pass for "${concept.title}": ${concrete.applied} of ${concrete.applied + concrete.rejected.length} edits matched, keeping the draft`,
+      );
+      concrete.bodyMd = drafted.bodyMd;
+    } else if (concrete.rejected.length > 0) {
+      log.warn(
+        `concreteness pass for "${concept.title}": ${concrete.rejected.length} edit(s) did not match and were skipped`,
+      );
+    }
 
     concrete.bodyMd = scrubTemplateArtifacts(concrete.bodyMd);
 
@@ -917,11 +988,27 @@ const proposeUpdatesHandler: JobHandler = async (payload) => {
     .map((c, i) => `${i}. ${c.title}: ${c.summary}`)
     .join("\n");
 
+  // Every picture the course has, new and old, in one numbered list. Both ends
+  // are needed: the new one to propose, the old one to name as superseded.
+  // Rejected ones are left out, since the author has already said no to those
+  // and a proposal to reinstate one is not what this stage is for.
+  const figures = describeFigures(id).filter((f) => f.status !== "rejected");
+  const figureList = figures
+    .map((f, i) => {
+      const where = f.usedBy.length
+        ? `shown in: ${f.usedBy.join(", ")}`
+        : "not shown in any module yet";
+      const caption = f.altText ? ` Caption: "${f.altText}".` : "";
+      return `${i}. from "${f.sourceName}" (${f.status}, ${where}).${caption} Around it: ${f.around || "(no surrounding text)"}`;
+    })
+    .join("\n");
+
   const result = await runProposeUpdates(
     {
       lang: course.lang,
       objective: course.objective ?? course.sourcePrompt,
       conceptList,
+      figureList,
       material,
     },
     id,
@@ -931,8 +1018,46 @@ const proposeUpdatesHandler: JobHandler = async (payload) => {
     id,
     result.proposals,
     concepts.map((c) => ({ id: c.id, title: c.title })),
+    figures.map((f) => ({ id: f.id })),
   );
   return { proposals: stored };
+};
+
+// --- the sources moved -------------------------------------------------------
+
+/**
+ * Re-read the attached sources and turn whatever changed into proposals.
+ *
+ * The whole point is that it stops here. A changed page becomes pending
+ * proposals on the course, exactly as adding material by hand does, and an
+ * author approves them one at a time. Rewriting the modules automatically would
+ * be the same feature with the trust taken out: a course that changes under the
+ * students because somebody edited a wiki page, with nobody having read the
+ * edit.
+ */
+const checkSourcesHandler: JobHandler = async () => {
+  const swept = await sweepSources();
+  for (const [id, sourceIds] of swept.byCourse) {
+    // Charged to whoever owns the course, not to the schedule: the spend is
+    // real and it has to land on somebody's ledger. An unowned course (an
+    // install from before ownership existed) runs uncapped, as seed work does.
+    const owner = db
+      .select({ ownerId: coursesT.ownerId })
+      .from(coursesT)
+      .where(eq(coursesT.id, id))
+      .get()?.ownerId;
+    enqueue("propose_updates", {
+      courseId: id,
+      sourceIds,
+      actorUserId: owner ?? null,
+    });
+  }
+  return {
+    checked: swept.checked,
+    changed: swept.changed,
+    unreachable: swept.unreachable,
+    courses: swept.byCourse.size,
+  };
 };
 
 // --- preflight: does the selected model hold up against these prompts --------
@@ -956,4 +1081,5 @@ export const HANDLERS: Record<string, JobHandler> = {
   generate_course: generateCourseHandler,
   regenerate_module: regenerateModuleHandler,
   propose_updates: proposeUpdatesHandler,
+  check_sources: checkSourcesHandler,
 };

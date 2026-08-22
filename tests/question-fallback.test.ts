@@ -8,7 +8,7 @@ vi.mock("@/lib/llm/tasks/write_questions", () => ({
 
 const { writeQuestionRows } = await import("@/lib/jobs/handlers");
 
-const COURSE = { lang: "en", sourcePrompt: "brief" };
+const COURSE = { lang: "en", sourcePrompt: "brief", authorContextMd: null };
 
 function concept(depthLevel: number) {
   return {
@@ -92,5 +92,29 @@ describe("when the test writer comes back empty", () => {
     runWriteQuestions.mockRejectedValue(new Error("provider down"));
     const rows = await writeQuestionRows("course_1", COURSE, concept(3), "body");
     expect(rows).toEqual([]);
+  });
+
+  it("hands the writer what the author said people get wrong", async () => {
+    // The distractors worth writing are the mistakes somebody actually made on
+    // this system, and the only place those are recorded is the interview. The
+    // stage was not being given them at all.
+    runWriteQuestions.mockResolvedValueOnce({ questions: [question("a")] });
+    await writeQuestionRows(
+      "course_1",
+      { ...COURSE, authorContextMd: "Everyone restarts the gateway on a 503." },
+      concept(2),
+      "body",
+    );
+    expect(runWriteQuestions.mock.calls[0]![0].authorContext).toBe(
+      "Everyone restarts the gateway on a 503.",
+    );
+  });
+
+  it("passes an empty string, never undefined, when there was no interview", async () => {
+    // The prompt renderer throws on a missing variable, so undefined here would
+    // fail every call on a course whose author skipped the interview.
+    runWriteQuestions.mockResolvedValueOnce({ questions: [question("a")] });
+    await writeQuestionRows("course_1", COURSE, concept(2), "body");
+    expect(runWriteQuestions.mock.calls[0]![0].authorContext).toBe("");
   });
 });

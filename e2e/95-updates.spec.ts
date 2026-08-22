@@ -1,4 +1,5 @@
 import { test, expect, request as pwRequest, type APIRequestContext } from "@playwright/test";
+import { wait } from "./timeouts";
 
 /**
  * Reworking a finished course: assessed mode, new material becoming proposals,
@@ -53,19 +54,19 @@ test.describe("reworking a finished course", () => {
       return ((await res.json()) as { course: { status: string } }).course.status;
     };
     await expect
-      .poll(courseStatus, { timeout: 60_000, intervals: [500, 1000] })
+      .poll(courseStatus, { timeout: wait(60), intervals: [500, 1000] })
       .toBe("interview");
     expect(
       (await ctx.post(`/api/courses/${id}/interview`, { data: { answers: {} } })).ok(),
     ).toBeTruthy();
     await expect
-      .poll(courseStatus, { timeout: 60_000, intervals: [500, 1000] })
+      .poll(courseStatus, { timeout: wait(60), intervals: [500, 1000] })
       .toBe("concept_review");
     expect(
       (await ctx.post(`/api/courses/${id}/concepts`, { data: { dropIds: [] } })).ok(),
     ).toBeTruthy();
     await expect
-      .poll(courseStatus, { timeout: 120_000, intervals: [500, 1000] })
+      .poll(courseStatus, { timeout: wait(120), intervals: [500, 1000] })
       .toBe("ready");
 
     // Assessed mode is the author's choice, from the course page.
@@ -110,7 +111,7 @@ test.describe("reworking a finished course", () => {
     // carries both actions, so three cards mean three Approve buttons: this is
     // the poll working, since the page was opened before the job had finished.
     await expect(panel.getByRole("button", { name: "Approve" })).toHaveCount(3, {
-      timeout: 60_000,
+      timeout: wait(60),
     });
     await expect(panel.locator("li", { hasText: "Retire" })).toBeVisible();
 
@@ -144,7 +145,7 @@ test.describe("reworking a finished course", () => {
       return read();
     };
     await expect
-      .poll(settled, { timeout: 120_000, intervals: [1000, 2000] })
+      .poll(settled, { timeout: wait(120), intervals: [1000, 2000] })
       .toBe(true);
 
     await page.goto(`/courses/${id}`);
@@ -170,7 +171,7 @@ test.describe("reworking a finished course", () => {
     // The button stays on the module page now (no bounce to the overview): the
     // rewrite runs in the background and the page swaps in the new body itself.
     await expect
-      .poll(settled, { timeout: 120_000, intervals: [1000, 2000] })
+      .poll(settled, { timeout: wait(120), intervals: [1000, 2000] })
       .toBe(true);
 
     // Same URL, still the module: the rewrite reused the id, so a reader sitting

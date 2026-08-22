@@ -107,6 +107,25 @@ FERRATA_LOG_KEEP=5            # rotated files to keep
 
 # open sign-up to anyone who can reach the server. Off by default: see below.
 # FERRATA_OPEN_REGISTRATION=1
+
+# how much of the attached material the planning stages read before choosing
+# the concepts. 14000 characters by default, 3500 under FERRATA_LITE=1. Raise it
+# on a long-context model if your courses are built from large repositories.
+# FERRATA_OVERVIEW_CHARS=14000
+
+# re-read attached links every N days and raise proposals for what changed.
+# 0 or unset = never. Opt-in because it makes outbound requests on a timer.
+# Only linked pages: an uploaded file keeps its text, not its bytes.
+# FERRATA_SOURCE_CHECK_DAYS=7
+
+# how much runs at once. Modules within one course are written 4 at a time, and
+# the worker runs 2 jobs side by side so a second author's course does not wait
+# behind the first one's build. Jobs for the same course never overlap.
+# The two multiply: at the defaults, at most 8 model calls are in flight, which
+# is the number to lower on a rate-limited tier (or set FERRATA_LITE=1, which
+# writes one module at a time).
+# FERRATA_MODULE_CONCURRENCY=4   # 1-8
+# FERRATA_WORKER_LANES=2         # 1-4
 ```
 
 ```bash
@@ -218,20 +237,54 @@ tail -f /var/log/ferrata/ferrata.log
 
 ## 7. Backup
 
-The database is one file. Copy it while the app is running with the SQLite
-backup command to get a consistent snapshot:
+Everything lives in the database, uploaded material included, so the database is
+the whole state. But it is not one file while the service is running: SQLite is
+in WAL mode, and `ferrata.db-wal` next to it holds every write since the last
+checkpoint. A plain `cp` of `ferrata.db` copies neither the WAL nor a consistent
+point in time, and hands you a database rolled back to the last checkpoint. It
+restores cleanly and is missing whatever came after, which is the worst way for
+a backup to fail.
+
+The app takes one on its own, so this is not something to remember. Once a day,
+whenever the worker has nothing else to do, it writes a consistent snapshot,
+reopens the copy and counts what is in it, and keeps the newest seven. Settings
+shows the age of the last one and what reading it back found, which is where a
+schedule that has been failing for a fortnight stops looking like silence.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `FERRATA_BACKUP_DIR` | `backups/` next to the database | Where copies go. Put it on a different disk if you have one. |
+| `FERRATA_BACKUP_EVERY_HOURS` | `24` | Hours between copies. `0` turns the schedule off, for a host that snapshots the volume itself. |
+| `FERRATA_BACKUP_KEEP` | `7` | How many to keep. Older ones are deleted as each new one lands. |
+
+A directory inside `public/` is refused rather than warned about: the database
+holds every password hash and your provider key, and `public/` is served.
+
+Before an upgrade, take one yourself: **Settings, Backups, Back up now**, or
+
+```bash
+cd /opt/ferrata
+FERRATA_DB_PATH=/var/lib/ferrata/ferrata.db pnpm db:backup /backups/ferrata-$(date +%F).db
+```
+
+With the sqlite3 binary installed, this is the same operation:
 
 ```bash
 sqlite3 /var/lib/ferrata/ferrata.db ".backup /backups/ferrata-$(date +%F).db"
 ```
 
-Restoring is copying the file back and restarting the service. Uploaded course
-material lives inside the database, so the file is the whole state.
+Restoring is stopping the service, copying the file back, and starting it again.
+Stop first: replacing `ferrata.db` under a running process leaves it with a WAL
+belonging to the database you just removed.
 
 ## 8. Update
 
+Take a backup first. Replacing the app folder without one is how a finished
+course gets lost, and nothing prints an error when it happens.
+
 ```bash
 cd /opt/ferrata
+FERRATA_DB_PATH=/var/lib/ferrata/ferrata.db pnpm db:backup
 git pull
 pnpm install
 pnpm build
@@ -239,6 +292,9 @@ sudo systemctl restart ferrata
 ```
 
 Database migrations run automatically on boot.
+
+Keep the database out of the folder you replace. With `FERRATA_DB_PATH` pointing
+at `/var/lib/ferrata`, as above, an upgrade cannot touch it.
 
 ## Troubleshooting
 

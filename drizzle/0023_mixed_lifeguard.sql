@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `actor_user_id` text;

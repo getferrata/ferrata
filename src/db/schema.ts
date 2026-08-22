@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  blob,
   integer,
   sqliteTable,
   text,
@@ -285,6 +286,19 @@ export const sources = sqliteTable(
     errorKind: text("error_kind"),
     // Contextia (DLP) verdict recorded at ingestion; null until the gate is wired.
     sensitivityJson: text("sensitivity_json"),
+    /**
+     * sha256 of the text as extracted, before redaction.
+     *
+     * Before redaction on purpose: this answers "did the source change", and
+     * hashing the redacted text would also answer "did the Contextia mode
+     * change", reporting drift in a document nobody touched.
+     *
+     * Null on sources ingested before this column existed, and on the ones a
+     * scheduled check cannot re-read anyway.
+     */
+    contentHash: text("content_hash"),
+    /** When a scheduled check last re-read this source. Null if never. */
+    checkedAt: integer("checked_at"),
     createdAt: integer("created_at")
       .notNull()
       .default(sql`(unixepoch() * 1000)`),
@@ -490,7 +504,13 @@ export const cuts = sqliteTable(
 
 // --- proposals (course updates from new material) ----------------------------
 
-export type ProposalKind = "update_module" | "add_concept" | "retire_concept";
+export type ProposalKind =
+  | "update_module"
+  | "add_concept"
+  | "retire_concept"
+  // A picture from the new material belongs in a module, and may take the
+  // place of one the course already shows.
+  | "place_figure";
 export type ProposalStatus = "pending" | "approved" | "dismissed";
 
 // A suggested change to a finished course, produced when the author adds new
@@ -530,6 +550,16 @@ export const jobs = sqliteTable(
     id: text("id").primaryKey(),
     type: text("type").notNull(),
     payloadJson: text("payload_json").notNull(),
+    /**
+     * Who queued this, as a column rather than a field inside the payload.
+     *
+     * Ownership was being checked by asking whether the payload blob contained
+     * the user's id as a substring. That is right only for as long as no other
+     * id lives in the same payload: the day one gains a courseId or a target
+     * user, the match becomes ambiguous and nothing fails, because the
+     * behaviour stays correct until two ids happen to collide.
+     */
+    actorUserId: text("actor_user_id"),
     status: text("status").$type<JobStatus>().notNull().default("queued"),
     attempts: integer("attempts").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
@@ -564,6 +594,19 @@ export const llmCalls = sqliteTable(
     model: text("model").notNull(),
     tokensIn: integer("tokens_in").notNull().default(0),
     tokensOut: integer("tokens_out").notNull().default(0),
+    /**
+     * The cached share of tokensIn, which is where the discount lives: a read
+     * bills at a tenth of the input rate, a write at a quarter above it.
+     *
+     * Recorded rather than inferred because caching is the one saving in this
+     * pipeline that can fail completely and silently. A prefix a few tokens
+     * under the provider's minimum is never cached, no error says so, and every
+     * call pays full price while the code looks like it is saving money. These
+     * two columns are how that shows up: reads stuck at zero across a whole
+     * course means the cache is not working, whatever the design intended.
+     */
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
     costUsd: real("cost_usd").notNull().default(0),
     // costUsd in whole US cents, which is what a credit is. Integer so a
     // balance never drifts the way a running sum of floats does.
@@ -626,6 +669,59 @@ export const appSettings = sqliteTable("app_settings", {
     .default(sql`(unixepoch() * 1000)`),
 });
 
+// --- figures ----------------------------------------------------------------
+
+export type FigureStatus = "pending" | "approved" | "rejected";
+
+/**
+ * A picture lifted out of a source document, and the decision somebody made
+ * about it.
+ *
+ * Images are the one thing that walks past Contextia. The DLP gate scans
+ * strings, and a screenshot of a terminal holding an API key is not a string:
+ * it would sail through ingestion and into a course that gets exported and
+ * shared. So no figure is ever part of a course by arriving; it is part of a
+ * course by being approved, one at a time, by the author who can see what is in
+ * it. A person looking at the pixels catches what text scanning cannot, the
+ * whiteboard with a customer's name on it as well as the key.
+ *
+ * Bytes live here rather than on disk, so a course is still one file to back up
+ * and there is no second path to get wrong.
+ */
+export const figures = sqliteTable(
+  "figures",
+  {
+    id: text("id").primaryKey(),
+    courseId: text("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    sourceId: text("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "cascade" }),
+    /** sha256 of the bytes: the dedup key, and what the text token points at. */
+    sha256: text("sha256").notNull(),
+    mime: text("mime").notNull(),
+    bytes: integer("bytes").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    /** The document's own alt text, when it had any. */
+    altText: text("alt_text"),
+    /** Where it sat in the source, so the token can be put back in order. */
+    ord: integer("ord").notNull().default(0),
+    status: text("status").$type<FigureStatus>().notNull().default("pending"),
+    decidedAt: integer("decided_at"),
+    decidedBy: text("decided_by"),
+    data: blob("data", { mode: "buffer" }).notNull(),
+    createdAt: integer("created_at")
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    index("figures_course_idx").on(t.courseId),
+    index("figures_source_idx").on(t.sourceId),
+  ],
+);
+
 // --- inferred types ---------------------------------------------------------
 
 export type Course = typeof courses.$inferSelect;
@@ -642,3 +738,4 @@ export type Review = typeof reviews.$inferSelect;
 export type Cut = typeof cuts.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type LlmCall = typeof llmCalls.$inferSelect;
+export type Figure = typeof figures.$inferSelect;

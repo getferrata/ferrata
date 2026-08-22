@@ -25,6 +25,18 @@ Return a single JSON object (no prose, no code fences):
 - `retire_concept`: the new material says this concept is gone or no longer the
   student's job. Set `conceptIndex`; `candidate` is null. Retiring deletes the
   module and its tests, so the reason must quote what makes it obsolete.
+- `place_figure`: a picture came in with the new material and a module should
+  show it. Set `figureIndex` to its number from the picture list below and
+  `conceptIndex` to the module that should carry it. If it supersedes a picture
+  the course already shows, set `replacesFigureIndex` to that one's number: the
+  old picture is then withdrawn, so a superseded diagram cannot go on being
+  taught beside its replacement.
+
+  You cannot see any of these pictures. Judge them by the document they came
+  from, their caption, and the prose they sat between, which is given for each.
+  Propose one only when that evidence actually says what it depicts: a drawing
+  placed in the wrong module is worse than one left out, because nobody
+  rereads a diagram they have been shown once.
 
 ## Rules
 
@@ -44,6 +56,11 @@ Objective: {{objective}}
 Concepts, numbered (use these numbers for conceptIndex):
 
 {{conceptList}}
+
+Pictures, numbered (use these numbers for figureIndex and
+replacesFigureIndex). `[QUI]` marks where the picture sat in its document:
+
+{{figureList}}
 
 ## The NEW material
 

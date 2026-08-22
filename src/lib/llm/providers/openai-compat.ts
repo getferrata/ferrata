@@ -1,6 +1,7 @@
 import {
   LlmCallError,
   LlmConfigError,
+  systemText,
   type LlmCompletion,
   type LlmCompletionRequest,
   type LlmProvider,
@@ -47,8 +48,13 @@ export class OpenAICompatProvider implements LlmProvider {
     req: LlmCompletionRequest,
     model: string,
   ): Promise<LlmCompletion> {
+    // No cache breakpoints to set here: OpenAI-compatible endpoints that cache
+    // do it automatically on the prefix, and the ones that do not ignore the
+    // question. Either way the split still earns its keep, because it is what
+    // puts the stable text first.
+    const system = systemText(req.system);
     const messages = [
-      ...(req.system ? [{ role: "system", content: req.system }] : []),
+      ...(system ? [{ role: "system", content: system }] : []),
       ...req.messages.map((m) => ({ role: m.role, content: m.content })),
     ];
 

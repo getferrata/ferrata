@@ -9,7 +9,7 @@ process.env.FERRATA_DB_PATH = join(
 );
 
 const { db } = await import("@/db");
-const { concepts, courses, cuts, edges, jobs, modules, proposals, questions, reviews } =
+const { concepts, courses, cuts, edges, figures: figuresT, jobs, modules, proposals, questions, reviews, sources: sourcesT } =
   await import("@/db/schema");
 const { applyProposal, decideProposal, pendingProposals, recordProposals } =
   await import("@/lib/course/proposals");
@@ -366,5 +366,182 @@ describe("one rewrite per concept, whichever path asks", () => {
       .all()
       .filter((j) => j.type === "regenerate_module");
     expect(jobRows).toHaveLength(1);
+  });
+});
+
+describe("a picture that arrived with the new material", () => {
+  /**
+   * The scenario this exists for: the client changed their network and sent
+   * the new topology map. Extraction already stored it, and until now nothing
+   * downstream could say where it belonged. A proposal that cannot name a
+   * picture leaves the author with an approved image sitting in the database
+   * and a course still teaching last year's diagram beside it.
+   */
+
+  function seedFigure(courseId: string, sha: string): string {
+    const sourceId = newId("src");
+    db.insert(sourcesT)
+      .values({ id: sourceId, courseId, kind: "file", name: "handbook.docx" })
+      .run();
+    const id = newId("fig");
+    db.insert(figuresT)
+      .values({
+        id,
+        courseId,
+        sourceId,
+        sha256: sha,
+        mime: "image/png",
+        bytes: 10,
+        width: 800,
+        height: 600,
+        ord: 0,
+        status: "pending",
+        data: Buffer.from("0123456789"),
+      })
+      .run();
+    return id;
+  }
+
+  const status = (id: string): string =>
+    db.select().from(figuresT).where(eq(figuresT.id, id)).get()?.status ?? "gone";
+
+  it("is stored against the module it belongs in, with what it replaces", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const oldFig = seedFigure(courseId, "a".repeat(64));
+    const newFig = seedFigure(courseId, "b".repeat(64));
+
+    const stored = recordProposals(
+      courseId,
+      [
+        {
+          kind: "place_figure",
+          conceptIndex: 0,
+          figureIndex: 1,
+          replacesFigureIndex: 0,
+          reason: "la topologia è cambiata: due router di bordo invece di uno",
+        },
+      ],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: oldFig }, { id: newFig }],
+    );
+
+    expect(stored).toBe(1);
+    const p = pendingProposals(courseId)[0]!;
+    expect(p.kind).toBe("place_figure");
+    expect(p.conceptId).toBe(conceptId);
+    expect(JSON.parse(p.payloadJson ?? "{}")).toEqual({
+      figureId: newFig,
+      replacesFigureId: oldFig,
+    });
+  });
+
+  it("approving accepts the new one and withdraws the old one", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const oldFig = seedFigure(courseId, "a".repeat(64));
+    const newFig = seedFigure(courseId, "b".repeat(64));
+    recordProposals(
+      courseId,
+      [{ kind: "place_figure", conceptIndex: 0, figureIndex: 1, replacesFigureIndex: 0, reason: "r" }],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: oldFig }, { id: newFig }],
+    );
+
+    const applied = applyProposal(pendingProposals(courseId)[0]!, "user_1");
+    expect(applied).toEqual({ ok: true, effect: "figure_placed" });
+    expect(status(newFig)).toBe("approved");
+    // Withdrawn, not deleted: it stops being rendered and the record of who
+    // decided survives, which the invariants require.
+    expect(status(oldFig)).toBe("rejected");
+  });
+
+  it("queues the rewrite rather than splicing a token into the body", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const fig = seedFigure(courseId, "b".repeat(64));
+    recordProposals(
+      courseId,
+      [{ kind: "place_figure", conceptIndex: 0, figureIndex: 0, replacesFigureIndex: null, reason: "r" }],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: fig }],
+    );
+    applyProposal(pendingProposals(courseId)[0]!, "user_1");
+    const queued = db.select().from(jobs).all();
+    expect(queued.some((j) => j.type === "regenerate_module")).toBe(true);
+  });
+
+  it("places one without replacing anything, which is the common case", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const fig = seedFigure(courseId, "b".repeat(64));
+    recordProposals(
+      courseId,
+      [{ kind: "place_figure", conceptIndex: 0, figureIndex: 0, replacesFigureIndex: null, reason: "r" }],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: fig }],
+    );
+    expect(applyProposal(pendingProposals(courseId)[0]!, "user_1").ok).toBe(true);
+    expect(status(fig)).toBe("approved");
+  });
+
+  it("drops a proposal naming a picture that does not exist", () => {
+    // The model's word on two separate lists, and an index it invented is as
+    // likely on one as on the other.
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const fig = seedFigure(courseId, "b".repeat(64));
+    const stored = recordProposals(
+      courseId,
+      [{ kind: "place_figure", conceptIndex: 0, figureIndex: 7, replacesFigureIndex: null, reason: "r" }],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: fig }],
+    );
+    expect(stored).toBe(0);
+  });
+
+  it("drops one with no picture named at all", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const stored = recordProposals(
+      courseId,
+      [{ kind: "place_figure", conceptIndex: 0, figureIndex: null, replacesFigureIndex: null, reason: "r" }],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [],
+    );
+    expect(stored).toBe(0);
+  });
+
+  it("allows two pictures for one module but not the same one twice", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const a = seedFigure(courseId, "a".repeat(64));
+    const b = seedFigure(courseId, "b".repeat(64));
+    const stored = recordProposals(
+      courseId,
+      [
+        { kind: "place_figure", conceptIndex: 0, figureIndex: 0, replacesFigureIndex: null, reason: "r" },
+        { kind: "place_figure", conceptIndex: 0, figureIndex: 1, replacesFigureIndex: null, reason: "r" },
+        { kind: "place_figure", conceptIndex: 0, figureIndex: 0, replacesFigureIndex: null, reason: "r" },
+      ],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: a }, { id: b }],
+    );
+    expect(stored).toBe(2);
+  });
+
+  it("refuses to apply one whose picture was deleted in the meantime", () => {
+    const courseId = seedCourse();
+    const conceptId = seedConcept(courseId, "La rete di sede");
+    const fig = seedFigure(courseId, "b".repeat(64));
+    recordProposals(
+      courseId,
+      [{ kind: "place_figure", conceptIndex: 0, figureIndex: 0, replacesFigureIndex: null, reason: "r" }],
+      [{ id: conceptId, title: "La rete di sede" }],
+      [{ id: fig }],
+    );
+    db.delete(figuresT).where(eq(figuresT.id, fig)).run();
+    const applied = applyProposal(pendingProposals(courseId)[0]!, "user_1");
+    expect(applied.ok).toBe(false);
   });
 });

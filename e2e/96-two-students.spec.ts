@@ -5,6 +5,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import { STUDENT, STUDENT2 } from "./personas";
+import { wait } from "./timeouts";
 
 /**
  * Two students on one course must not see each other's progress. Everything
@@ -49,15 +50,15 @@ test.describe("two students on one course stay isolated", () => {
         course: { status: string };
       }).course.status;
     await expect
-      .poll(status, { timeout: 60_000, intervals: [500, 1000] })
+      .poll(status, { timeout: wait(60), intervals: [500, 1000] })
       .toBe("interview");
     await ctx.post(`/api/courses/${id}/interview`, { data: { answers: {} } });
     await expect
-      .poll(status, { timeout: 60_000, intervals: [500, 1000] })
+      .poll(status, { timeout: wait(60), intervals: [500, 1000] })
       .toBe("concept_review");
     await ctx.post(`/api/courses/${id}/concepts`, { data: { dropIds: [] } });
     await expect
-      .poll(status, { timeout: 120_000, intervals: [500, 1000] })
+      .poll(status, { timeout: wait(120), intervals: [500, 1000] })
       .toBe("ready");
 
     // Both students enrolled in the same course.

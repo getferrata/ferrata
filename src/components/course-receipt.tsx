@@ -44,6 +44,12 @@ export function CourseReceipt({
           label="Tokens"
           value={`${fmt(spend.tokensIn)} in · ${fmt(spend.tokensOut)} out`}
         />
+        {spend.cacheReadTokens > 0 ? (
+          <Row
+            label="From cache"
+            value={`${fmt(spend.cacheReadTokens)} in · at a tenth of the rate`}
+          />
+        ) : null}
       </dl>
       <p className="mt-3 max-w-measure text-step--1 text-text-muted">
         Charged by your provider, on your own key. Ferrata takes nothing. This

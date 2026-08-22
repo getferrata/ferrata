@@ -20,5 +20,5 @@ export function ciEnum<const T extends readonly [string, ...string[]]>(
     .string()
     .transform((v) => canon.get(v.trim().toLowerCase()) ?? v)
     .pipe(z.enum(values as unknown as [string, ...string[]]));
-  return schema as unknown as z.ZodType<T[number]>;
+  return schema;
 }

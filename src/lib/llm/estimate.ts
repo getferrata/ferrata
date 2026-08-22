@@ -34,7 +34,12 @@ import { estimateCostUsd } from "./cost";
  * finished a few courses the estimate uses its own measured average instead,
  * which reflects the model, the depth and the kind of material actually in use.
  */
-const BASE_TOKENS = { in: 12_000, out: 10_000 };
+// Input raised from 12000 after the planning stages started reading 14000
+// characters of material instead of 3500. Three of the five once-per-course
+// calls carry that overview, so the change is about 2600 tokens each. It is a
+// couple of cents on a strong model, and it buys a concept list drawn from the
+// material rather than from its first paragraphs.
+const BASE_TOKENS = { in: 20_000, out: 10_000 };
 const PER_MODULE_TOKENS = { in: 34_000, out: 13_000 };
 
 export interface CourseCostEstimate {

@@ -26,9 +26,62 @@ function noteName(index: number, title: string): string {
 export interface Vault {
   dirName: string;
   files: { name: string; content: string }[];
+  /** Pictures the notes embed, written beside them so the vault stands alone. */
+  assets: { name: string; data: Buffer }[];
 }
 
-export function buildVault(bundle: CourseBundle): Vault {
+/** An approved figure, with the bytes, as the caller reads them. */
+export interface VaultFigure {
+  sha256: string;
+  mime: string;
+  data: Buffer;
+}
+
+const EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/avif": "avif",
+  "image/tiff": "tiff",
+};
+
+/**
+ * Turn the figure tokens in a body into embeds, and name the files they point
+ * at.
+ *
+ * Obsidian's own `![[file]]` rather than markdown's `![](path)`, because that is
+ * what makes the picture show in the vault and travel with a note somebody
+ * drags into another folder.
+ *
+ * A token whose figure is not here, because it was never approved or was left
+ * out of the export, is removed. A vault carrying `⟨fig:...⟩` in the prose
+ * would be showing the reader the plumbing.
+ */
+export function embedFigures(
+  bodyMd: string,
+  figures: VaultFigure[],
+): { body: string; used: Set<string> } {
+  const used = new Set<string>();
+  if (!bodyMd.includes("⟨fig:")) return { body: bodyMd, used };
+  const bySlug = new Map(figures.map((f) => [f.sha256.slice(0, 12), f]));
+  const body = bodyMd.replace(/⟨fig:([0-9a-f]{12})⟩/g, (_, short: string) => {
+    const f = bySlug.get(short);
+    if (!f) return "";
+    used.add(f.sha256);
+    return `![[${assetName(f)}]]`;
+  });
+  return { body, used };
+}
+
+export function assetName(f: VaultFigure): string {
+  return `assets/fig-${f.sha256.slice(0, 12)}.${EXT[f.mime] ?? "png"}`;
+}
+
+export function buildVault(
+  bundle: CourseBundle,
+  figures: VaultFigure[] = [],
+): Vault {
   const { course, modules, edges, cuts } = bundle;
   const nameByConcept = new Map<string, string>();
   modules.forEach((m, i) => nameByConcept.set(m.concept.id, noteName(i, m.concept.title)));
@@ -39,6 +92,7 @@ export function buildVault(bundle: CourseBundle): Vault {
   };
 
   const files: { name: string; content: string }[] = [];
+  const usedFigures = new Set<string>();
 
   // Index note.
   const indexLines = [
@@ -82,6 +136,12 @@ export function buildVault(bundle: CourseBundle): Vault {
       .map((e) => link(e.to))
       .filter((l): l is string => Boolean(l));
 
+    const { body: embedded, used } = embedFigures(
+      m.module?.bodyMd ?? m.concept.summary,
+      figures,
+    );
+    for (const sha of used) usedFigures.add(sha);
+
     const parts = [
       "---",
       `title: "${m.concept.title.replace(/"/g, "'")}"`,
@@ -94,7 +154,7 @@ export function buildVault(bundle: CourseBundle): Vault {
       "",
       `# ${m.concept.title}`,
       "",
-      m.module?.bodyMd ?? m.concept.summary,
+      embedded,
       "",
     ];
     if (prereqLinks.length) {
@@ -123,17 +183,26 @@ export function buildVault(bundle: CourseBundle): Vault {
     });
   }
 
-  return { dirName: slug(course.title) || "corso", files };
+  return {
+    dirName: slug(course.title) || "corso",
+    files,
+    // Only the pictures a note actually embeds. A vault carrying an image no
+    // page shows is an image somebody exported by accident.
+    assets: figures
+      .filter((f) => usedFigures.has(f.sha256))
+      .map((f) => ({ name: assetName(f), data: f.data })),
+  };
 }
 
 /** Write the vault under the export dir and return the absolute path. */
 export async function writeVault(
   bundle: CourseBundle,
+  figures: VaultFigure[] = [],
   baseDir = process.env.FERRATA_EXPORT_DIR
     ? resolve(process.env.FERRATA_EXPORT_DIR)
     : resolve(process.cwd(), "exports"),
 ): Promise<{ path: string; fileCount: number }> {
-  const vault = buildVault(bundle);
+  const vault = buildVault(bundle, figures);
   // Same guard as the .ferrata.json export: refuse to write if a real protected
   // value (a hand-edited module could reintroduce one) would leave in clear.
   // The vault carries ⟨cxt:⟩ tokens, never the values behind them.
@@ -150,8 +219,14 @@ export async function writeVault(
   const dir = resolve(baseDir, vault.dirName);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
+  if (vault.assets.length > 0) {
+    await mkdir(resolve(dir, "assets"), { recursive: true });
+  }
   await Promise.all(
-    vault.files.map((f) => writeFile(resolve(dir, f.name), f.content, "utf8")),
+    [
+      ...vault.files.map((f) => writeFile(resolve(dir, f.name), f.content, "utf8")),
+      ...vault.assets.map((a) => writeFile(resolve(dir, a.name), a.data)),
+    ],
   );
-  return { path: dir, fileCount: vault.files.length };
+  return { path: dir, fileCount: vault.files.length + vault.assets.length };
 }

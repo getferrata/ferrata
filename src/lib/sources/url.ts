@@ -250,7 +250,7 @@ async function fetchRaw(raw: string): Promise<RawFetch> {
         signal: ctrl.signal,
         headers,
         ...(pinned ? { dispatcher: pinnedAgent(pinned) } : {}),
-      } as RequestInit);
+      });
 
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get("location");

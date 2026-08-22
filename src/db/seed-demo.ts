@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db, schema } from "./index";
 import type { BloomLevel, QuestionFormat } from "./schema";
+import { loadLocalEnv } from "../lib/env";
 
 const COURSE_ID = "course_demo_acme";
 
@@ -260,4 +261,5 @@ function seed(): void {
   );
 }
 
+loadLocalEnv();
 seed();

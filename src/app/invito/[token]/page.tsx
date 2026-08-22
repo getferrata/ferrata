@@ -5,6 +5,7 @@ import { FerrataMark } from "@/components/brand";
 import { getCurrentUser } from "@/lib/auth/session";
 import { readInvite, enrollByInvite, type InviteRefusal } from "@/lib/course/invite";
 import { plainText } from "@/lib/text";
+import { formString } from "@/lib/http/form";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Invite" };
@@ -66,7 +67,7 @@ export default async function InvitePage({
 
     async function accept(formData: FormData) {
       "use server";
-      const t = String(formData.get("token") ?? "");
+      const t = formString(formData, "token");
       const me = await getCurrentUser();
       if (!me) redirect(`/login?invite=${t}`);
       const courseId = enrollByInvite(t, me.id);

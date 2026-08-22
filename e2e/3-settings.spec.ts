@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { wait } from "./timeouts";
 
 /**
  * The model & key panel: live model list from the (mock) provider with human
@@ -25,7 +26,7 @@ test("settings panel lists live models, tests, and saves", async ({ page }) => {
     .selectOption({ label: "OpenAI and compatible (ChatGPT, gateways)" });
   const writing = page.getByLabel("Writing model (modules and tests)");
   await expect(writing.getByRole("option", { name: /Mock Strong/ })).toBeAttached({
-    timeout: 15_000,
+    timeout: wait(15),
   });
   await writing.selectOption({ label: "Mock Strong" });
 
@@ -68,7 +69,7 @@ test("the preflight builds a real module and reports what it cost", async ({
   await page.getByRole("button", { name: "Run a test module" }).click();
 
   await expect(page.getByText("This model works with Ferrata.")).toBeVisible({
-    timeout: 60_000,
+    timeout: wait(60),
   });
   // Every stage of the pipeline is accounted for by name, not just a tick.
   for (const stage of [
@@ -83,6 +84,12 @@ test("the preflight builds a real module and reports what it cost", async ({
     await expect(page.getByRole("cell", { name: stage })).toBeVisible();
   }
   await expect(page.getByText(/none discarded/)).toBeVisible();
+
+  // The concreteness pass returns edits now, and an edit either matches the
+  // text it claims to change or it is refused and named here. This is the only
+  // place in the suite that exercises that stage at all: the journey runs with
+  // FERRATA_LITE=1, which skips it along with the judge.
+  await expect(page.getByText(/edit not found|edit ambiguous/)).toHaveCount(0);
 });
 
 test("students cannot spend the key on a preflight", async ({ browser }) => {
@@ -91,5 +98,42 @@ test("students cannot spend the key on a preflight", async ({ browser }) => {
   });
   const res = await ctx.request.post("/api/settings/preflight");
   expect(res.status()).toBe(403);
+  await ctx.close();
+});
+
+test("the backup panel takes one, reads it back, and says so", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  const panel = page.locator("#backups");
+  await expect(
+    panel.getByRole("heading", { name: "Backups" }),
+  ).toBeVisible();
+  // Nothing should be quietly disabled: a refused directory is the one way the
+  // schedule silently does nothing, and it has to be on the page if it happens.
+  await expect(panel.getByText(/downloadable/)).toHaveCount(0);
+
+  await panel.getByRole("button", { name: "Back up now" }).click();
+  // The claim that matters is not "a file was written": it is that the file was
+  // opened again and had the courses in it.
+  await expect(panel.getByText(/Last one .*courses.*modules/)).toBeVisible({
+    timeout: wait(30),
+  });
+  await expect(panel.getByText("not verified")).toHaveCount(0);
+  await page.screenshot({
+    path: "e2e/.artifacts/shots/63-backups.png",
+    fullPage: true,
+  });
+});
+
+test("students cannot copy the database out", async ({ browser }) => {
+  // The copy holds every password hash and the provider key, so this endpoint
+  // is worth probing in both directions rather than trusting the panel to be
+  // the only caller.
+  const ctx = await browser.newContext({
+    storageState: "e2e/.artifacts/student.json",
+  });
+  expect((await ctx.request.post("/api/settings/backup")).status()).toBe(403);
+  expect((await ctx.request.get("/api/settings/backup")).status()).toBe(403);
   await ctx.close();
 });

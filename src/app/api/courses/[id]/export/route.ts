@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCourseBundle } from "@/lib/course/query";
 import { writeVault } from "@/lib/export/obsidian";
 import { getCurrentUser } from "@/lib/auth/session";
+import { exportableFigures } from "@/lib/sources/figures";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,9 @@ export async function POST(
       { status: 409 },
     );
   }
-  const { path, fileCount } = await writeVault(bundle);
+  const { path, fileCount } = await writeVault(
+    bundle,
+    exportableFigures(bundle.course.id),
+  );
   return NextResponse.json({ path, fileCount }, { status: 201 });
 }

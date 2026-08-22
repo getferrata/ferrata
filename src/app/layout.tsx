@@ -1,7 +1,21 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+/**
+ * Where this install answers from, for the absolute URLs in social previews.
+ *
+ * A self-hosted app does not know its own address at build time, which is why
+ * this was left unset, and Next then warned twice on every build of every
+ * install and resolved preview images against localhost. Reading it from the
+ * environment costs one variable and removes both: set it and the previews
+ * work, leave it and they point at the local port, which is where the app is.
+ */
+const publicUrl =
+  process.env.FERRATA_PUBLIC_URL?.trim() ||
+  `http://localhost:${process.env.PORT ?? 3000}`;
+
 export const metadata: Metadata = {
+  metadataBase: new URL(publicUrl),
   title: {
     default: "Ferrata",
     template: "%s · Ferrata",

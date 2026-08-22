@@ -8,17 +8,22 @@ process.env.FERRATA_DB_PATH = join(
   "test.db",
 );
 
+const { eq } = await import("drizzle-orm");
 const { db } = await import("@/db");
 const {
   concepts,
   courses,
   enrollments,
+  modules,
   questions,
   reviews,
   users,
 } = await import("@/db/schema");
 const { newId, now } = await import("@/lib/util/id");
 const { getCourseAggregate } = await import("@/lib/course/aggregate");
+const { conceptRetentionByStudent, getDashboard } = await import(
+  "@/lib/course/dashboard"
+);
 const { review } = await import("@/lib/fsrs");
 
 let courseId = "";
@@ -65,6 +70,7 @@ function answer(
 beforeEach(() => {
   db.delete(reviews).run();
   db.delete(questions).run();
+  db.delete(modules).run();
   db.delete(enrollments).run();
   db.delete(concepts).run();
   db.delete(courses).run();
@@ -175,5 +181,207 @@ describe("the examiner's view of a course", () => {
     const agg = getCourseAggregate(courseId);
     expect(agg.weakForMany.map((w) => w.title)).toContain("VRRP");
     expect(agg.weakForMany[0]?.weakStudents).toBe(2);
+  });
+
+  it("carries the module to rewrite and what to rewrite it against", () => {
+    // The diagnosis on its own sends an author to rewrite blind. These two
+    // fields are what turn the row into an action: which module, and how many
+    // questions the writer would actually be handed.
+    const q = seedConceptWithQuestion("VRRP");
+    const conceptId = db
+      .select({ id: questions.conceptId })
+      .from(questions)
+      .where(eq(questions.id, q))
+      .get()!.id;
+    const moduleId = newId("module");
+    db.insert(modules)
+      .values({ id: moduleId, conceptId, bodyMd: "body", status: "ready" })
+      .run();
+    answer(q, seedStudent("Anna"), false, now());
+    answer(q, seedStudent("Marco"), false, now());
+
+    const [weak] = getCourseAggregate(courseId).weakForMany;
+    expect(weak).toMatchObject({ moduleId, failedQuestions: 1 });
+  });
+
+  it("offers no module for a concept whose module was never written", () => {
+    // A build that failed on this concept, or a concept added and not yet
+    // written. An action pointing at a module that does not exist would 404 on
+    // click, so the page has to be able to tell.
+    const q = seedConceptWithQuestion("VRRP");
+    answer(q, seedStudent("Anna"), false, now());
+    answer(q, seedStudent("Marco"), false, now());
+
+    expect(getCourseAggregate(courseId).weakForMany[0]?.moduleId).toBeNull();
+  });
+
+  it("reports no failed questions when the class is weak only by decay", () => {
+    // Weak because the spacing model says the answer has faded, with nobody
+    // having got a specific question wrong. There is nothing concrete for a
+    // rewrite to aim at, and the page must not offer one: it would be a bill,
+    // not a fix.
+    const q = seedConceptWithQuestion("VRRP");
+    // Right, but long enough ago that knowledge held has decayed below weak.
+    const longAgo = new Date(Date.now() - 365 * 24 * 3600 * 1000);
+    for (const name of ["Anna", "Marco"]) {
+      const card = review(null, true, "high").next;
+      db.insert(reviews)
+        .values({
+          id: newId("review"),
+          questionId: q,
+          userId: seedStudent(name),
+          answeredAt: Math.floor(longAgo.getTime() / 1000),
+          correct: true,
+          confidence: "high",
+          gradedBy: "system",
+          fsrsStateJson: JSON.stringify({
+            ...card,
+            last_review: longAgo.toISOString(),
+            due: longAgo.toISOString(),
+          }),
+        })
+        .run();
+    }
+
+    const [weak] = getCourseAggregate(courseId).weakForMany;
+    expect(weak?.weakStudents).toBe(2);
+    expect(weak?.failedQuestions).toBe(0);
+  });
+});
+
+describe("reading the whole roster", () => {
+  /** Seed a course of `concepts` x `perConcept` questions answered by `students`. */
+  function seedClass(
+    conceptCount: number,
+    perConcept: number,
+    studentCount: number,
+  ): { userIds: string[]; questionIds: string[] } {
+    const questionIds: string[] = [];
+    for (let c = 0; c < conceptCount; c++) {
+      const conceptId = newId("concept");
+      db.insert(concepts)
+        .values({
+          id: conceptId,
+          courseId,
+          title: `Concept ${c}`,
+          summary: "s",
+          topoOrder: c,
+        })
+        .run();
+      for (let q = 0; q < perConcept; q++) {
+        const questionId = newId("q");
+        db.insert(questions)
+          .values({
+            id: questionId,
+            conceptId,
+            prompt: `c${c} q${q}?`,
+            expectedAnswer: "yes",
+            bloomLevel: "remember",
+            format: "open",
+            misconceptionsJson: "[]",
+          })
+          .run();
+        questionIds.push(questionId);
+      }
+    }
+    const userIds: string[] = [];
+    for (let s = 0; s < studentCount; s++) {
+      const userId = seedStudent(`Student ${s}`);
+      userIds.push(userId);
+      // Everyone answers everything, later students getting more wrong, so the
+      // weak-for-many threshold has something real to cross.
+      questionIds.forEach((qid, i) => {
+        answer(qid, userId, (i + s) % 3 !== 0, now() - (i + 1) * 10);
+      });
+    }
+    return { userIds, questionIds };
+  }
+
+  it("gives every student the same numbers their own dashboard would", () => {
+    // The guarantee that matters: this is a read done once instead of once per
+    // student, not a different calculation. Compared against the per-student
+    // path it replaced, over a class big enough for a mistake to show.
+    const { userIds } = seedClass(4, 3, 6);
+    const batched = conceptRetentionByStudent(courseId, userIds);
+
+    for (const userId of userIds) {
+      const own = getDashboard(courseId, new Date(), userId);
+      const mine = batched.get(userId);
+      expect(mine).toBeDefined();
+      for (const c of own!.concepts) {
+        const same = mine!.find((x) => x.conceptId === c.conceptId);
+        expect(same, `concept ${c.title} for ${userId}`).toBeDefined();
+        expect(same!.retention).toBe(c.retention);
+        expect(same!.total).toBe(c.total);
+        expect(same!.tested).toBe(c.tested);
+      }
+    }
+  });
+
+  it("costs the same number of queries whatever the class size", () => {
+    // The defect was that the page cost grew with the roster. Counting reads is
+    // the only assertion that holds that, because a correct answer computed the
+    // slow way still looks correct.
+    const sqlite = (
+      globalThis as unknown as { __ferrataSqlite?: { prepare: unknown } }
+    ).__ferrataSqlite;
+    expect(sqlite, "raw handle for counting reads").toBeDefined();
+
+    const real = sqlite!.prepare as (sql: string) => unknown;
+    let reads = 0;
+    const count = (sql: string) => {
+      if (/^\s*select/i.test(sql)) reads++;
+      return real.call(sqlite, sql);
+    };
+
+    const small = seedClass(3, 2, 2);
+    (sqlite as { prepare: unknown }).prepare = count;
+    reads = 0;
+    conceptRetentionByStudent(courseId, small.userIds);
+    const forTwo = reads;
+    (sqlite as { prepare: unknown }).prepare = real;
+
+    const big = seedClass(3, 2, 20);
+    (sqlite as { prepare: unknown }).prepare = count;
+    reads = 0;
+    conceptRetentionByStudent(courseId, big.userIds);
+    const forTwentyTwo = reads;
+    (sqlite as { prepare: unknown }).prepare = real;
+
+    expect(forTwo).toBeGreaterThan(0);
+    expect(forTwentyTwo).toBe(forTwo);
+
+    // And the shape this replaced, measured the same way, so a pass above means
+    // something. Asking each student's dashboard separately reads more as the
+    // class grows, which was the whole finding.
+    (sqlite as { prepare: unknown }).prepare = count;
+    reads = 0;
+    for (const userId of small.userIds) getDashboard(courseId, new Date(), userId);
+    const oldForTwo = reads;
+    reads = 0;
+    for (const userId of big.userIds) getDashboard(courseId, new Date(), userId);
+    const oldForTwentyTwo = reads;
+    (sqlite as { prepare: unknown }).prepare = real;
+
+    expect(oldForTwentyTwo).toBeGreaterThan(oldForTwo * 5);
+  });
+
+  it("still counts a concept weak only when half the class is weak on it", () => {
+    // The behaviour the batching had to preserve, over a roster large enough
+    // that an off-by-one in the threshold would show.
+    const { userIds, questionIds } = seedClass(2, 2, 8);
+    db.delete(reviews).run();
+    // Six of eight get the first concept wrong; two get everything right.
+    userIds.forEach((userId, i) => {
+      questionIds.forEach((qid, q) => {
+        const firstConcept = q < 2;
+        answer(qid, userId, !(firstConcept && i < 6), now() - q * 10);
+      });
+    });
+
+    const agg = getCourseAggregate(courseId);
+    expect(agg.measuredStudents).toBe(8);
+    expect(agg.weakForMany).toHaveLength(1);
+    expect(agg.weakForMany[0]?.weakStudents).toBe(6);
   });
 });

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { wait } from "./timeouts";
 
 /**
  * Material ingestion and course output paths: an uploaded file becomes a
@@ -33,19 +34,19 @@ test("file upload becomes a source; a dead link fails honestly", async ({
   await page.locator("#urls").fill("http://127.0.0.1:9/private-wiki");
 
   await page.getByRole("button", { name: /Rig the path/ }).click();
-  await page.waitForURL(/\/courses\//, { timeout: 30_000 });
+  await page.waitForURL(/\/courses\//, { timeout: wait(30) });
 
   // Ride the pipeline to ready (mock model).
   await expect(
     page.getByRole("heading", { name: "A few questions" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
   await page.getByRole("button", { name: /Continue/ }).click();
   await expect(
     page.getByRole("heading", { name: "Review the plan before building" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
   await page.getByRole("button", { name: /Build the modules/ }).click();
   await expect(page.getByRole("heading", { name: "The route" })).toBeVisible({
-    timeout: 90_000,
+    timeout: wait(90),
   });
 
   // The uploaded file is a real, sized source; the dead link is "not read".
@@ -63,9 +64,36 @@ test("a finished course exports as a portable package", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "The route" })).toBeVisible();
 
   const downloadP = page.waitForEvent("download");
-  await page.getByRole("link", { name: "Export Ferrata package" }).click();
+  await page.getByRole("button", { name: "Export Ferrata package" }).click();
   const download = await downloadP;
   expect(download.suggestedFilename()).toMatch(/\.ferrata\.json$/);
+});
+
+test("a refused export says why, on the page", async ({ page }) => {
+  // The export can refuse for a reason worth reading: the package would carry
+  // a protected value in clear, and which one. As a plain download link the
+  // browser took the response and rendered its own error page over it, so the
+  // author got "409 Conflict" and never saw the sentence explaining it.
+  await page.route("**/api/courses/*/package", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error:
+          "Export refused: the package would carry 1 protected value(s) in clear (Private IP address). Nothing was written.",
+      }),
+    }),
+  );
+
+  await page.goto("/courses");
+  await page.getByRole("link", { name: /Acme edge onboarding/ }).first().click();
+  await page.getByRole("button", { name: "Export Ferrata package" }).click();
+
+  // An alert, so it is announced rather than only drawn, and scoped because
+  // the page carries other live regions of its own.
+  const refusal = page.getByRole("alert").filter({ hasText: "Export refused" });
+  await expect(refusal).toContainText("Private IP address");
+  await expect(refusal).toContainText("Nothing was written");
 });
 
 test("review renders honestly for the student", async ({ browser }) => {
@@ -91,10 +119,10 @@ test("material alone is enough: no brief required", async ({ page }) => {
     buffer: Buffer.from(RUNBOOK),
   });
   await page.getByRole("button", { name: /Rig the path/ }).click();
-  await page.waitForURL(/\/courses\//, { timeout: 30_000 });
+  await page.waitForURL(/\/courses\//, { timeout: wait(30) });
   await expect(
     page.getByRole("heading", { name: "A few questions" }),
-  ).toBeVisible({ timeout: 60_000 });
+  ).toBeVisible({ timeout: wait(60) });
 });
 
 test("nothing at all is refused with a clear message", async ({ page }) => {

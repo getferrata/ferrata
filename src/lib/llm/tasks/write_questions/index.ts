@@ -4,6 +4,7 @@ import { runStructuredTask } from "@/lib/llm/run";
 import { OUTPUT_CAPS } from "@/lib/llm/tasks/caps";
 import { moduleBodyMessage } from "@/lib/llm/material";
 import { questionsSchema, type QuestionsResult } from "./schema";
+import { repairQuestions } from "./repair";
 
 const PROMPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "prompt.md");
 
@@ -13,6 +14,8 @@ export interface WriteQuestionsArgs {
   bodyMd: string;
   depthLevel: number;
   sourcePrompt: string;
+  /** The author's interview answers, verbatim. Trusted, like the brief. */
+  authorContext: string;
   /** How many questions to write; derived from depth/length by the orchestrator. */
   count: number;
 }
@@ -30,10 +33,12 @@ export async function runWriteQuestions(
       conceptTitle: args.conceptTitle,
       depthLevel: String(args.depthLevel),
       sourcePrompt: args.sourcePrompt,
+      authorContext: args.authorContext.trim() || "(no interview answers)",
       count: String(args.count),
     },
     extraMessages: [moduleBodyMessage(args.bodyMd)],
     schema: questionsSchema,
+    repair: repairQuestions,
     courseId,
     temperature: 0.5,
     maxTokens: OUTPUT_CAPS.write_questions,

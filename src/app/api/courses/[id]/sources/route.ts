@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cappedFormData } from "@/lib/http/body";
+import { formString } from "@/lib/http/form";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { courses } from "@/db/schema";
@@ -77,14 +78,14 @@ export async function POST(
     );
   }
 
-  const text = String(form.get("text") ?? "").trim();
+  const text = formString(form, "text").trim();
   if (text) {
     results.push(
       await ingestSource(id, { kind: "text", name: "added notes", text }, mode),
     );
   }
 
-  const urls = String(form.get("urls") ?? "")
+  const urls = formString(form, "urls")
     .split(/[\n,]+/)
     .map((s) => s.trim())
     .filter((s) => /^https?:\/\//i.test(s))

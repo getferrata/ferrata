@@ -58,7 +58,15 @@ export async function cappedFormData(
     // Re-wrap the bytes we counted so the standard multipart parser does the
     // parsing, with the Content-Type (and its boundary) carried over.
     const body = new Uint8Array(buf);
-    const form = await new Response(body, { headers: req.headers }).formData();
+    // Only the content type, which carries the multipart boundary. Copying every
+    // header brought content-length with it: a client that declares 5 bytes and
+    // sends 40 MB is already stopped by the cap above, but the parser then saw a
+    // body that disagreed with its own length and failed as "malformed", which
+    // is an error message that lies about what happened.
+    const contentType = req.headers.get("content-type");
+    const form = await new Response(body, {
+      headers: contentType ? { "content-type": contentType } : {},
+    }).formData();
     return { ok: true, form };
   } catch {
     return { ok: false, reason: "malformed" };

@@ -7,9 +7,24 @@ import { ciEnum } from "@/lib/llm/zod";
  * this shape applies itself.
  */
 export const proposalItemSchema = z.object({
-  kind: ciEnum(["update_module", "add_concept", "retire_concept"]),
+  kind: ciEnum([
+    "update_module",
+    "add_concept",
+    "retire_concept",
+    "place_figure",
+  ]),
   /** Index into the numbered concept list in the prompt; null for add_concept. */
   conceptIndex: z.number().int().min(0).nullable(),
+  /**
+   * place_figure only: which picture, as an index into the numbered picture
+   * list in the prompt, and which one it takes the place of.
+   *
+   * Separate from `conceptIndex` because the two lists are different lists, and
+   * a single index field would have made a wrong number impossible to notice.
+   */
+  figureIndex: z.number().int().min(0).nullable().optional(),
+  /** place_figure only: the picture this one supersedes, if it supersedes one. */
+  replacesFigureIndex: z.number().int().min(0).nullable().optional(),
   /** add_concept only: the new concept, in the shape intake produces. */
   candidate: z
     .object({

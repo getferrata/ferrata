@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cappedFormData } from "@/lib/http/body";
+import { formString } from "@/lib/http/form";
 import { db } from "@/db";
 import { courses } from "@/db/schema";
 import { enqueue } from "@/lib/jobs/queue";
@@ -60,13 +61,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   // Capped: the brief is stored in sourcePrompt and from there is interpolated
   // into every module prompt of the whole build, so an unbounded one is paid for
   // once per module, not once.
-  const prompt = String(form.get("prompt") ?? "")
+  const prompt = formString(form, "prompt")
     .trim()
     .slice(0, MAX_PROMPT_CHARS);
   const hasFiles = form
     .getAll("files")
     .some((f) => f instanceof File && f.size > 0);
-  const hasUrls = /https?:\/\//i.test(String(form.get("urls") ?? ""));
+  const hasUrls = /https?:\/\//i.test(formString(form, "urls"));
   const repoPath = (form.get("repoPath") as string | null)?.trim() ?? "";
   const hasRepo = Boolean(repoPath);
   const hasMaterial = hasFiles || hasUrls || hasRepo;
@@ -205,14 +206,14 @@ export async function POST(req: Request): Promise<NextResponse> {
   // instead of copy-pasting. Each is fetched server-side behind an SSRF guard,
   // extracted to text, and passes the Contextia gate. Best-effort: a bad/blocked
   // URL becomes a failed source (visible on the course page), never sinks creation.
-  const seeds = String(form.get("urls") ?? "")
+  const seeds = formString(form, "urls")
     .split(/[\n,]+/)
     .map((s) => s.trim())
     .filter((s) => /^https?:\/\//i.test(s))
     .slice(0, 20);
   // Opt-in shallow crawl: expand each seed into its same-site subpages
   // (depth 1, robots.txt honored, hard page cap). Seeds always come first.
-  const crawl = String(form.get("crawl") ?? "") === "1";
+  const crawl = formString(form, "crawl") === "1";
   let urls = seeds;
   if (crawl && seeds.length > 0) {
     try {

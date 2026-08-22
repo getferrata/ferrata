@@ -73,6 +73,49 @@ export function balanceFor(userId: string, at: number = Date.now()): Balance {
   };
 }
 
+/**
+ * Credits committed to calls that are running right now, per user.
+ *
+ * The ceiling is read from the ledger, and a call only reaches the ledger once
+ * it has finished. That was accurate while the pipeline ran one call at a time:
+ * the most anyone could overshoot by was the single call in flight. With
+ * modules written several at a time, the others are invisible to the check, and
+ * the overshoot grows with the concurrency instead of staying at one call.
+ *
+ * In memory on purpose, and not a durable reservation. This is a
+ * within-process view of within-process work: a process that dies takes its
+ * in-flight calls with it and there is nothing to leak or reconcile. The ledger
+ * stays the only durable record, and it is still what the balance is summed
+ * from.
+ */
+const reserved = new Map<string, number>();
+
+/**
+ * Hold `credits` against a user for the duration of one call. Returns the
+ * release, which is safe to call more than once so a `finally` can be
+ * unconditional.
+ */
+export function reserveCredits(
+  userId: string | null,
+  credits: number,
+): () => void {
+  if (!userId || !Number.isFinite(credits) || credits <= 0) return () => {};
+  reserved.set(userId, (reserved.get(userId) ?? 0) + credits);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const left = (reserved.get(userId) ?? 0) - credits;
+    if (left > 0) reserved.set(userId, left);
+    else reserved.delete(userId);
+  };
+}
+
+/** Credits held against this user by calls that have not landed yet. */
+export function reservedBy(userId: string): number {
+  return reserved.get(userId) ?? 0;
+}
+
 /** Raised when a call would take someone past their ceiling. */
 export class CreditLimitError extends Error {
   constructor(
@@ -91,9 +134,10 @@ export class CreditLimitError extends Error {
  * Gate a call before it runs; checking afterwards would only report the
  * overspend.
  *
- * A plain balance test, not a reservation held across the call: one call costs
- * a fraction of a cent, so the worst overshoot is a single call, and a
- * reservation would leak every time a process died mid-request.
+ * What is counted is the ledger plus what the calls currently in flight are
+ * expected to cost. Without the second term the ceiling would be read from a
+ * figure that four concurrent modules are all busy making out of date, and each
+ * of them would be waved through on the same stale number.
  */
 export function assertWithinLimit(userId: string | null): void {
   // No actor means an operator-run seed script, not a request: those run
@@ -103,6 +147,6 @@ export function assertWithinLimit(userId: string | null): void {
   if (!userId) return;
   const limit = creditLimit();
   if (limit === null) return;
-  const spent = spentBy(userId);
-  if (spent >= limit) throw new CreditLimitError(userId, spent, limit);
+  const committed = spentBy(userId) + reservedBy(userId);
+  if (committed >= limit) throw new CreditLimitError(userId, committed, limit);
 }

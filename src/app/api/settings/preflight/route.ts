@@ -1,10 +1,13 @@
-import { and, desc, eq, like } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { jobs } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
 import { enqueue } from "@/lib/jobs/queue";
 import { newId } from "@/lib/util/id";
+import { planTask } from "@/lib/llm/registry";
+import { toCompatibilityRow } from "@/lib/llm/preflight/publish";
+import type { PreflightReport } from "@/lib/llm/preflight/report";
 
 export const runtime = "nodejs";
 
@@ -18,6 +21,11 @@ export const runtime = "nodejs";
  */
 
 function isRunning(userId: string): boolean {
+  // Queued AND running. A job is queued for the second or two before the worker
+  // claims it and running for the minute or three it takes, so asking only
+  // about "queued" left the guard closed for almost none of the window it was
+  // written to cover: a second click, or a reload, queued another eight billed
+  // calls on the install's key.
   return Boolean(
     db
       .select({ id: jobs.id })
@@ -25,8 +33,8 @@ function isRunning(userId: string): boolean {
       .where(
         and(
           eq(jobs.type, "preflight"),
-          eq(jobs.status, "queued"),
-          like(jobs.payloadJson, `%"${userId}"%`),
+          inArray(jobs.status, ["queued", "running"]),
+          eq(jobs.actorUserId, userId),
         ),
       )
       .get(),
@@ -65,31 +73,33 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "examiners only" }, { status: 403 });
   }
   const wanted = new URL(req.url).searchParams.get("jobId");
+  // Scoped in the query rather than fetched and checked after. Another
+  // examiner's run is not this one's to read: the report carries what the
+  // install spends and on which model.
+  const mine = and(eq(jobs.type, "preflight"), eq(jobs.actorUserId, me.id));
   const row = db
     .select()
     .from(jobs)
-    .where(
-      wanted
-        ? and(eq(jobs.id, wanted), eq(jobs.type, "preflight"))
-        : and(
-            eq(jobs.type, "preflight"),
-            like(jobs.payloadJson, `%"${me.id}"%`),
-          ),
-    )
+    .where(wanted ? and(mine, eq(jobs.id, wanted)) : mine)
     .orderBy(desc(jobs.createdAt))
     .limit(1)
     .get();
 
   if (!row) return NextResponse.json({ status: "none" });
-  // Another examiner's run is not this examiner's to read: the report carries
-  // what the install spends and on which model.
-  if (!row.payloadJson.includes(`"${me.id}"`)) {
-    return NextResponse.json({ status: "none" });
-  }
+  const report = row.resultJson
+    ? (JSON.parse(row.resultJson) as PreflightReport)
+    : null;
+  // The row an operator may choose to publish, computed here rather than in the
+  // browser so what leaves the machine is decided by one function with tests on
+  // it. Offered, never sent: nothing here posts it anywhere.
+  const plan = planTask("write_module");
   return NextResponse.json({
     jobId: row.id,
     status: row.status,
     error: row.error,
-    report: row.resultJson ? JSON.parse(row.resultJson) : null,
+    report,
+    publishable: report
+      ? toCompatibilityRow(report, plan.model, plan.providerName)
+      : null,
   });
 }

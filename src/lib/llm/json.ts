@@ -82,6 +82,9 @@ export function extractJson(raw: string): unknown {
       `Could not parse or repair JSON from model output: ${
         err instanceof Error ? err.message : String(err)
       }`,
+      // Kept, not just quoted into the message: whoever debugs this wants the
+      // stack from the parser, not a sentence about it.
+      { cause: err },
     );
   }
 }

@@ -95,7 +95,7 @@ export function retrievability(
   now: Date = new Date(),
 ): number {
   if (!stored) return 0;
-  return f.get_retrievability(toCard(stored, now), now, false) as number;
+  return f.get_retrievability(toCard(stored, now), now, false);
 }
 
 /**

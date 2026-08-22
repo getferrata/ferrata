@@ -73,7 +73,7 @@ export function addCredential(input: {
   db.insert(webCredentials)
     .values({ ...row, secret: sealSecret(row.secret) })
     .run();
-  return row as WebCredential;
+  return row;
 }
 
 export function deleteCredential(id: string): void {

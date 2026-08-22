@@ -7,6 +7,8 @@ import {
   modules as modulesT,
   packages as packagesT,
   questions as questionsT,
+  figures as figuresT,
+  sources as sourcesT,
 } from "@/db/schema";
 import { newId } from "@/lib/util/id";
 import { ferrataPackageSchema, type FerrataPackage } from "./format";
@@ -121,6 +123,45 @@ export function importPackage(pkg: FerrataPackage, ownerId: string): string {
           status: "ready",
         })
         .run();
+    }
+
+    // Pictures arrive pending, exactly as they do when a document is ingested.
+    // The gate on a figure is a person looking at it, and the person who looked
+    // at these works somewhere else: a diagram that was fine to show inside the
+    // company that wrote it is not automatically fine inside the one that
+    // received the package. The tokens in the bodies render as nothing until
+    // somebody here says otherwise.
+    if (pkg.figures?.length) {
+      const sourceId = newId("src");
+      tx.insert(sourcesT)
+        .values({
+          id: sourceId,
+          courseId,
+          kind: "text",
+          name: "pictures from the imported package",
+          status: "ok",
+        })
+        .run();
+      pkg.figures.forEach((f, ord) => {
+        const data = Buffer.from(f.dataBase64, "base64");
+        if (data.length === 0) return;
+        tx.insert(figuresT)
+          .values({
+            id: newId("fig"),
+            courseId,
+            sourceId,
+            sha256: f.sha256,
+            mime: f.mime,
+            bytes: data.length,
+            width: f.width,
+            height: f.height,
+            altText: f.altText,
+            ord,
+            status: "pending",
+            data,
+          })
+          .run();
+      });
     }
 
     for (const q of pkg.questions) {

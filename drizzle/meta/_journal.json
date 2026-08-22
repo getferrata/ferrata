@@ -162,6 +162,34 @@
       "when": 1785308407143,
       "tag": "0022_thin_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1785317566562,
+      "tag": "0023_mixed_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1786824848538,
+      "tag": "0024_lame_wolf_cub",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1786825813499,
+      "tag": "0025_groovy_dormammu",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1786889630465,
+      "tag": "0026_chief_robbie_robertson",
+      "breakpoints": true
     }
   ]
 }

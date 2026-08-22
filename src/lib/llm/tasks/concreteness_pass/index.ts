@@ -7,7 +7,7 @@ import {
   untrustedMaterialMessage,
 } from "@/lib/llm/material";
 import { concretenessSchema, type ConcretenessResult } from "./schema";
-import { parseConcretenessOutput } from "./format";
+import { applyConcretenessEdits } from "./apply";
 
 const PROMPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "prompt.md");
 
@@ -21,12 +21,21 @@ export interface ConcretenessArgs {
   sources: string;
 }
 
-/** concreteness_pass stage: make the module physical or declare it abstract. */
+/**
+ * concreteness_pass stage: make the module physical, or say plainly that it is
+ * not, by returning the edits rather than the module remade.
+ *
+ * Back to JSON here, having moved away from it a release ago. That was not a
+ * mistake reversed: the delimiter format is right for an answer that is one
+ * long markdown body, and it was the right fix while this stage produced one.
+ * Changing the shape of the answer is the better fix, and a short list of
+ * replacements is exactly what JSON is for.
+ */
 export async function runConcretenessPass(
   args: ConcretenessArgs,
   courseId?: string,
 ): Promise<ConcretenessResult> {
-  return runStructuredTask({
+  const out = await runStructuredTask({
     task: "concreteness_pass",
     promptPath: PROMPT_PATH,
     vars: {
@@ -47,12 +56,9 @@ export async function runConcretenessPass(
     courseId,
     temperature: 0.4,
     maxTokens: OUTPUT_CAPS.concreteness_pass,
-    // The body is long-form markdown, not JSON. Same reason as write_module.
-    jsonMode: false,
-    parse: parseConcretenessOutput,
-    formatName:
-      "the required format (a NOTES: block of one-line bullets, then a line with ---BODY---, then the markdown body)",
   });
+  return applyConcretenessEdits(args.bodyMd, out);
 }
 
 export { concretenessSchema, type ConcretenessResult } from "./schema";
+export { applyConcretenessEdits, editsAreTrustworthy } from "./apply";

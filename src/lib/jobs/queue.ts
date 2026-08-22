@@ -25,6 +25,9 @@ export function enqueue(
       id,
       type,
       payloadJson: JSON.stringify(payload),
+      // Also a column, so ownership can be asked as a question about a field
+      // rather than about the shape of a blob.
+      actorUserId: payload.actorUserId,
       status: "queued",
       maxAttempts: opts.maxAttempts ?? 3,
       runAfter: opts.runAfter ?? now(),
@@ -46,6 +49,8 @@ export function enqueueRegenerateModuleOnce(
   courseId: string,
   conceptId: string,
   actorUserId: string | null,
+  /** Rewrite against the questions readers get wrong, not from nothing. */
+  useFailures = false,
 ): boolean {
   const inFlight = db
     .select({ id: jobs.id })
@@ -59,41 +64,51 @@ export function enqueueRegenerateModuleOnce(
     )
     .get();
   if (inFlight) return false;
-  enqueue("regenerate_module", { courseId, conceptId, actorUserId });
+  enqueue("regenerate_module", {
+    courseId,
+    conceptId,
+    actorUserId,
+    useFailures,
+  });
   return true;
 }
 
-/**
- * True while a rewrite for this concept's module is queued or running. The
- * module page reads it to show a live "rewriting" banner instead of a stale
- * snapshot, and to keep polling until the swap lands.
- */
-export function moduleRewriteInFlight(conceptId: string): boolean {
-  return Boolean(
-    db
-      .select({ id: jobs.id })
-      .from(jobs)
-      .where(
-        and(
-          eq(jobs.type, "regenerate_module"),
-          inArray(jobs.status, ["queued", "running"]),
-          like(jobs.payloadJson, `%"${conceptId}"%`),
-        ),
-      )
-      .get(),
-  );
+/** The course a job is about, or null for work that belongs to no course. */
+export function jobCourseId(payloadJson: string): string | null {
+  try {
+    const p = JSON.parse(payloadJson) as { courseId?: unknown };
+    return typeof p.courseId === "string" ? p.courseId : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Atomically claim the next runnable job, marking it running. */
-export function claimNext(): Job | null {
+/**
+ * Atomically claim the next runnable job, marking it running.
+ *
+ * `busyCourseIds` are courses that already have a job running. The worker runs
+ * several jobs side by side, but never two on the same course: the stages of a
+ * build are ordered (intake decides the concepts the graph orders and the
+ * modules are written from), and a course whose `generate_course` overlapped
+ * its own retry would write every module twice, bill for both and have the
+ * second delete the questions the first wrote. Skipping rather than blocking is
+ * the point: the next course's work starts now instead of waiting behind a
+ * twenty-minute build.
+ */
+export function claimNext(
+  busyCourseIds: ReadonlySet<string> = new Set(),
+): Job | null {
   return db.transaction((tx) => {
-    const job = tx
+    const runnable = tx
       .select()
       .from(jobs)
       .where(and(eq(jobs.status, "queued"), lte(jobs.runAfter, now())))
       .orderBy(asc(jobs.runAfter))
-      .limit(1)
-      .get();
+      .all();
+    const job = runnable.find((j) => {
+      const courseId = jobCourseId(j.payloadJson);
+      return courseId === null || !busyCourseIds.has(courseId);
+    });
     if (!job) return null;
     tx.update(jobs)
       .set({ status: "running", attempts: job.attempts + 1, updatedAt: now() })
@@ -110,8 +125,74 @@ export function markDone(id: string, result: unknown): void {
       resultJson: JSON.stringify(result ?? null),
       updatedAt: now(),
     })
-    .where(eq(jobs.id, id))
+    // Only while it is still ours. A job abandoned for running past its
+    // deadline has been given up on and possibly queued again; letting a
+    // handler that finally returned mark it done would resurrect a row
+    // somebody else is now working, and report success for work whose result
+    // was already written off.
+    .where(and(eq(jobs.id, id), eq(jobs.status, "running")))
     .run();
+}
+
+/**
+ * How long a job of each type may run before the worker stops waiting for it.
+ *
+ * Generous, and measured rather than guessed: a full course build takes about
+ * twenty minutes on a hosted model, a module rewrite about five. The point is
+ * not to police slowness, it is that a handler which will never return should
+ * not hold a lane and a course forever.
+ *
+ * The failure this exists for is not the common one. A process that dies mid
+ * job is already recovered at the next startup, because a single worker means
+ * anything left `running` belongs to a process that is gone. What was left
+ * uncovered is a handler that hangs while the worker is perfectly alive: no
+ * timeout, no recovery, no sign on any page, and the only cure a restart the
+ * operator has no way of knowing they need.
+ */
+const DEADLINE_MS: Record<string, number> = {
+  generate_course: 90 * 60_000,
+  regenerate_module: 30 * 60_000,
+  propose_updates: 20 * 60_000,
+  check_sources: 20 * 60_000,
+};
+const DEFAULT_DEADLINE_MS = 15 * 60_000;
+
+export function jobDeadlineMs(type: string): number {
+  return DEADLINE_MS[type] ?? DEFAULT_DEADLINE_MS;
+}
+
+/**
+ * Give up on jobs that have been running past their deadline.
+ *
+ * Abandoned rather than stopped, and the difference is worth naming: nothing
+ * here can cancel a promise that is already in flight. What this does is stop
+ * counting on it, free the lane and the course, and say so. If the handler ever
+ * does return, markDone above refuses it.
+ *
+ * Retried if attempts remain, because the usual cause is a call that hung
+ * rather than work that is impossible, and the second attempt normally lands.
+ */
+export function abandonOverdue(at: number = now()): Job[] {
+  const abandoned: Job[] = [];
+  for (const job of db.select().from(jobs).where(eq(jobs.status, "running")).all()) {
+    const overdue = at - job.updatedAt > jobDeadlineMs(job.type);
+    if (!overdue) continue;
+    const minutes = Math.round(jobDeadlineMs(job.type) / 60_000);
+    const error = `abandoned: still running after ${minutes} minutes, so the worker stopped waiting for it`;
+    if (job.attempts >= job.maxAttempts) {
+      db.update(jobs)
+        .set({ status: "failed", error, updatedAt: at })
+        .where(eq(jobs.id, job.id))
+        .run();
+    } else {
+      db.update(jobs)
+        .set({ status: "queued", error, runAfter: at, updatedAt: at })
+        .where(eq(jobs.id, job.id))
+        .run();
+    }
+    abandoned.push(job);
+  }
+  return abandoned;
 }
 
 /**

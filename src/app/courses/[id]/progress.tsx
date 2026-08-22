@@ -87,7 +87,10 @@ export function PipelineProgress({ id }: { id: string }) {
       if (!stopped.current) setError(err instanceof Error ? err.message : "Error");
       return;
     }
-    if (!stopped.current) setTimeout(poll, 1500);
+    // void, and the reason is not decoration: setTimeout ignores what it is
+    // given, so a rejection from the next poll would go nowhere and the loop
+    // would stop with an unhandled rejection instead of an error on screen.
+    if (!stopped.current) setTimeout(() => void poll(), 1500);
   }, [id, router]);
 
   useEffect(() => {

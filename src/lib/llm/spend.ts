@@ -19,7 +19,11 @@ export interface CourseSpend {
   tokensOut: number;
   /** Wall clock from the first call to the last, which is what the author waited. */
   elapsedMs: number;
-  /** Sum of per-call latency, higher than elapsed only if calls overlapped. */
+  /**
+   * Sum of per-call latency. Now routinely several times `elapsedMs`, because
+   * modules are written several at a time: the gap between the two is the work
+   * the concurrency took off the author's wait.
+   */
   modelMs: number;
   failedCalls: number;
   /**
@@ -28,6 +32,16 @@ export interface CourseSpend {
    * which part, rather than presenting a precision it does not have.
    */
   estimatedCalls: number;
+  /**
+   * Of `tokensIn`, the share that was read from cache at a tenth of the rate.
+   *
+   * Here because caching is the one saving in this pipeline that can fail in
+   * total silence: a prefix a few tokens under the provider's minimum is never
+   * cached, nothing errors, and the build costs exactly what it did before
+   * while the code claims a discount. Zero on a course whose stages all cleared
+   * the threshold means the claim is wrong, and this is where that shows.
+   */
+  cacheReadTokens: number;
 }
 
 export function courseSpend(courseId: string): CourseSpend | null {
@@ -43,6 +57,7 @@ export function courseSpend(courseId: string): CourseSpend | null {
       lastLatency: sql<number>`coalesce(max(${llmCalls.latencyMs}), 0)`,
       failedCalls: sql<number>`sum(case when ${llmCalls.ok} = 0 then 1 else 0 end)`,
       estimatedCalls: sql<number>`sum(case when ${llmCalls.priceKnown} = 0 then 1 else 0 end)`,
+      cacheReadTokens: sql<number>`coalesce(sum(${llmCalls.cacheReadTokens}), 0)`,
     })
     .from(llmCalls)
     .where(eq(llmCalls.courseId, courseId))
@@ -60,6 +75,7 @@ export function courseSpend(courseId: string): CourseSpend | null {
     modelMs: row.modelMs,
     failedCalls: row.failedCalls ?? 0,
     estimatedCalls: row.estimatedCalls ?? 0,
+    cacheReadTokens: row.cacheReadTokens ?? 0,
   };
 }
 

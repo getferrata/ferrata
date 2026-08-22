@@ -105,6 +105,10 @@ export async function runPreflight(tag: string): Promise<PreflightReport> {
         startLevel: course.startLevel,
         sourcePrompt: PREFLIGHT_BRIEF,
         concretenessRule: course.concretenessRule,
+        // The fixture has no interview behind it, and the preflight is asking
+        // whether the model can hold the format, not whether it can weigh an
+        // author against a document.
+        authorContext: "",
         conceptTitle: concept.title,
         conceptSummary: concept.summary,
         depthLevel: concept.depthLevel,
@@ -134,6 +138,15 @@ export async function runPreflight(tag: string): Promise<PreflightReport> {
     ),
   );
   const finalBody = concrete?.bodyMd ?? bodyMd;
+  // An edit that quotes text the module does not contain is the model failing
+  // at this stage, even though the call succeeded and the schema passed. The
+  // operator is choosing a model here, so it belongs in the report.
+  for (const r of concrete?.rejected ?? []) {
+    errors.push({
+      task: "concreteness_pass",
+      message: `edit ${r.reason}: ${JSON.stringify(r.find.slice(0, 60))}`,
+    });
+  }
 
   await attempt("eval_judge", () =>
     runEvalJudge(
@@ -155,6 +168,7 @@ export async function runPreflight(tag: string): Promise<PreflightReport> {
         bodyMd: finalBody,
         depthLevel: concept.depthLevel,
         sourcePrompt: PREFLIGHT_BRIEF,
+        authorContext: "",
         count: 3,
       },
       tag,

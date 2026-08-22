@@ -12,8 +12,36 @@ export interface LlmMessage {
   content: string;
 }
 
+/**
+ * A system prompt split at the point where it stops being the same on every
+ * call.
+ *
+ * Caching is a prefix match: what is cacheable is the longest run of bytes that
+ * is identical from one call to the next, measured from the start of the
+ * prompt. A single variable interpolated near the top makes everything after it
+ * uncacheable, however stable that text is. So the split is declared where the
+ * prompt is written rather than guessed here.
+ *
+ * `stable` is the instructions plus the course-level facts: the same for all
+ * fourteen modules of a course. `perCall` is what changes, and goes after the
+ * break so it never shifts the prefix.
+ */
+export interface LlmSystemPrompt {
+  stable: string;
+  perCall?: string;
+}
+
+export type LlmSystem = string | LlmSystemPrompt;
+
+/** The whole system prompt as one string, for providers with no cache control. */
+export function systemText(system: LlmSystem | undefined): string {
+  if (!system) return "";
+  if (typeof system === "string") return system;
+  return [system.stable, system.perCall].filter(Boolean).join("\n\n");
+}
+
 export interface LlmCompletionRequest {
-  system?: string;
+  system?: LlmSystem;
   messages: LlmMessage[];
   temperature?: number;
   maxTokens?: number;
@@ -22,8 +50,22 @@ export interface LlmCompletionRequest {
 }
 
 export interface LlmUsage {
+  /**
+   * The whole prompt, cached parts included.
+   *
+   * The API reports the uncached remainder here and the cached spans
+   * separately; the providers add them back together so this column keeps
+   * meaning what it always meant (how big the prompt was) and stays comparable
+   * with the runs measured before caching existed. What the cache changes is
+   * the price of those tokens, not how many there were, and price is the two
+   * fields below.
+   */
   tokensIn: number;
   tokensOut: number;
+  /** Of `tokensIn`, those served from cache: billed at a tenth of the rate. */
+  cacheReadTokens?: number;
+  /** Of `tokensIn`, those written to cache: billed at 1.25x the rate. */
+  cacheWriteTokens?: number;
 }
 
 export interface LlmCompletion {

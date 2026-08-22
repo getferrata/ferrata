@@ -141,12 +141,56 @@ export interface TaskPlan {
 }
 
 /**
+ * An explicit address for a tier: `provider/model`, e.g.
+ * `anthropic/claude-sonnet-5`, `ollama/qwen2.5:7b`, or
+ * `openai/anthropic/claude-3.5-sonnet` when the OpenAI-compatible slot points
+ * at OpenRouter and the model name itself contains a slash.
+ *
+ * Set, nothing is inferred: not the provider from which key happens to exist,
+ * not the host from the shape of that key, not the model from a default table.
+ * The alternative, which this replaces as the recommended way to configure a
+ * provider Ferrata has no named support for, was to set three variables that
+ * have to agree with each other and to find out they did not by paying for a
+ * call that names a model the host has never heard of.
+ *
+ * Split on the first slash only. Every model id after the provider is passed
+ * through whole, including the slashes inside it.
+ */
+function explicitAddress(
+  tier: Tier,
+  e: Env,
+): { providerName: ProviderName; model: string } | null {
+  const raw = readEnv(e, tier === "heavy" ? "FERRATA_MODEL_HEAVY" : "FERRATA_MODEL_LIGHT", "");
+  if (!raw) return null;
+  const at = raw.indexOf("/");
+  if (at <= 0 || at === raw.length - 1) {
+    throw new LlmConfigError(
+      `FERRATA_MODEL_${tier.toUpperCase()} must be "provider/model" (got "${raw}"). Providers: anthropic, openai, ollama.`,
+    );
+  }
+  const providerName = raw.slice(0, at);
+  if (!["anthropic", "openai", "ollama"].includes(providerName)) {
+    throw new LlmConfigError(
+      `FERRATA_MODEL_${tier.toUpperCase()} names an unknown provider "${providerName}". Use anthropic, openai (any OpenAI-compatible host, with OPENAI_BASE_URL) or ollama.`,
+    );
+  }
+  return {
+    providerName: providerName as ProviderName,
+    model: raw.slice(at + 1),
+  };
+}
+
+/**
  * Pure resolution of which provider + model a task uses, given an env snapshot.
  * Side-effect free (constructs nothing), so it is unit-testable; resolveTask
  * builds on it. Defaults to process.env.
  */
 export function planTask(task: TaskName, e: Env = process.env): TaskPlan {
   const tier = TASK_TIER[task];
+  // An explicit address wins over everything, including the override: it is
+  // more specific than "use this provider" and says the model as well.
+  const explicit = explicitAddress(tier, e);
+  if (explicit) return { ...explicit, tier };
   const providerName = pickProviderName(tier, e);
   return { providerName, model: modelFor(providerName, tier, e), tier };
 }

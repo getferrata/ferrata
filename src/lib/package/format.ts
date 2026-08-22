@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { CourseBundle } from "@/lib/course/query";
+import { isWellKnownAddress } from "@/lib/sources/well-known";
 
 /**
  * The portable course package: text-only, diffable, **no student
@@ -78,6 +79,32 @@ export const ferrataPackageSchema = z.object({
   modules: z.array(packageModuleSchema).max(1000),
   questions: z.array(packageQuestionSchema).max(20000),
   cuts: z.array(z.object({ title: z.string(), reason: z.string() })).max(1000),
+  /**
+   * Approved figures, base64, so a course that teaches from a diagram still
+   * teaches from it after being exported and imported somewhere else.
+   *
+   * Only the approved ones travel, and they arrive pending at the other end.
+   * The gate on a picture is a person looking at it, and the person who looked
+   * at this one works somewhere else: a diagram that was fine to show inside
+   * the company that wrote it is not automatically fine to show inside the one
+   * that received the package.
+   *
+   * Optional so a package written before this existed still parses.
+   */
+  figures: z
+    .array(
+      z.object({
+        sha256: z.string().min(8).max(64),
+        mime: z.string().min(3).max(60),
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        altText: z.string().nullable(),
+        /** The bytes. Bounded here as well as at export, since this parses input. */
+        dataBase64: z.string().max(16_000_000),
+      }),
+    )
+    .max(200)
+    .optional(),
 });
 
 export type FerrataPackage = z.infer<typeof ferrataPackageSchema>;
@@ -93,9 +120,64 @@ export function sourceHashOf(sourcePrompt: string, authorContext: string): strin
  * Build a package from a loaded course. Deliberately excludes reviews/FSRS:
  * student state never travels in the package.
  */
+/**
+ * How much of the package the pictures may take.
+ *
+ * A course is a file people send each other, and a diagram at full camera
+ * resolution is bigger than every word of the course put together. Past this,
+ * the rest are left out, and the count says so rather than the package quietly
+ * arriving short.
+ */
+export const FIGURE_BUDGET_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Pack what fits, in the order given, and stop rather than truncate.
+ *
+ * Stopping at a whole picture keeps every one that travels intact. Splitting
+ * the budget across all of them, or cutting the last one short, would produce a
+ * package whose images are bytes that decode to nothing.
+ */
+function packFigures(
+  figures: ExportableFigure[],
+): NonNullable<FerrataPackage["figures"]> {
+  const out: NonNullable<FerrataPackage["figures"]> = [];
+  let spent = 0;
+  for (const f of figures) {
+    // Base64 is a third larger than the bytes, and the budget is on what the
+    // package actually weighs.
+    const cost = Math.ceil((f.data.length * 4) / 3);
+    if (spent + cost > FIGURE_BUDGET_BYTES) break;
+    spent += cost;
+    out.push({
+      sha256: f.sha256,
+      mime: f.mime,
+      width: f.width,
+      height: f.height,
+      altText: f.altText,
+      dataBase64: f.data.toString("base64"),
+    });
+  }
+  return out;
+}
+
+export interface ExportableFigure {
+  sha256: string;
+  mime: string;
+  width: number;
+  height: number;
+  altText: string | null;
+  data: Buffer;
+}
+
 export function buildPackage(
   bundle: CourseBundle,
-  opts: { author?: string | null; license?: string | null; exportedAt: number },
+  opts: {
+    author?: string | null;
+    license?: string | null;
+    exportedAt: number;
+    /** Approved figures only. The caller decides that; this only packs them. */
+    figures?: ExportableFigure[];
+  },
 ): FerrataPackage {
   const { course, modules, edges, cuts } = bundle;
   const context = course.authorContextMd ?? course.sourcePrompt;
@@ -152,6 +234,7 @@ export function buildPackage(
       })),
     ),
     cuts: cuts.map((c) => ({ title: c.title, reason: c.reason })),
+    figures: packFigures(opts.figures ?? []),
   };
 
   assertNoProtectedValues(pkg, bundle.restorations);
@@ -175,7 +258,14 @@ export function assertNoProtectedValues(
   if (restorations.length === 0) return;
   const serialised = JSON.stringify(pkg);
   const leaked = restorations.filter(
-    (r) => r.value.length > 3 && serialised.includes(r.value),
+    (r) =>
+      r.value.length > 3 &&
+      // A published constant in a module is not a leak, whether or not
+      // something once decided to protect it. The allowlist at detection stops
+      // the next course tokenizing these; this is what a course already built
+      // needs, because the alternative is paying to write it again.
+      !isWellKnownAddress(r.value) &&
+      serialised.includes(r.value),
   );
   if (leaked.length === 0) return;
   throw new Error(

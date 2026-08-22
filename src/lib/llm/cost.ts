@@ -45,13 +45,43 @@ export function isPriceKnown(provider: ProviderName, model: string): boolean {
   return provider === "ollama" || model in PRICES;
 }
 
+/**
+ * What a cached input token costs, as a multiple of the normal input rate.
+ *
+ * A read is a tenth; a write is a quarter more than full price. The write
+ * premium is why caching is not free to switch on: a prefix written once and
+ * never read again costs more than not caching at all, which is exactly what
+ * happens on a stage that runs once per course. It pays from the second call.
+ */
+const CACHE_READ_RATE = 0.1;
+const CACHE_WRITE_RATE = 1.25;
+
+export interface CacheTokens {
+  readTokens: number;
+  writeTokens: number;
+}
+
 export function estimateCostUsd(
   provider: ProviderName,
   model: string,
   tokensIn: number,
   tokensOut: number,
+  /**
+   * The cached share of `tokensIn`. Omitted where a provider does not report
+   * one, in which case the whole prompt is priced at the full rate, which is
+   * what it cost.
+   */
+  cache?: CacheTokens,
 ): number {
   if (provider === "ollama") return 0;
   const p = PRICES[model] ?? UNKNOWN_MODEL_PRICE;
-  return (tokensIn * p.in + tokensOut * p.out) / 1_000_000;
+  const read = Math.max(0, cache?.readTokens ?? 0);
+  const written = Math.max(0, cache?.writeTokens ?? 0);
+  // Clamped rather than trusted: tokensIn carries the cached spans, so a
+  // provider reporting more cached than total would otherwise price a negative
+  // number of tokens and hand back a discount that never happened.
+  const full = Math.max(0, tokensIn - read - written);
+  const inputUsd =
+    full * p.in + written * p.in * CACHE_WRITE_RATE + read * p.in * CACHE_READ_RATE;
+  return (inputUsd + tokensOut * p.out) / 1_000_000;
 }

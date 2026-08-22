@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { concepts, courses, edges, modules } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -47,14 +47,25 @@ export async function POST(
   const hasEdges =
     db.select({ id: edges.id }).from(edges).where(eq(edges.courseId, id)).get() !==
     undefined;
-  const written = conceptRows.filter(
-    (c) =>
-      db
-        .select({ id: modules.id })
-        .from(modules)
-        .where(and(eq(modules.conceptId, c.id), eq(modules.status, "ready")))
-        .get() !== undefined,
-  ).length;
+  // One query, not one per concept. Retry is rare enough that the old shape
+  // cost nothing, and it is still the pattern that was taken out of the
+  // dashboard: worth not sowing again where it is cheap to avoid.
+  const written =
+    conceptRows.length === 0
+      ? 0
+      : db
+          .select({ id: modules.id })
+          .from(modules)
+          .where(
+            and(
+              inArray(
+                modules.conceptId,
+                conceptRows.map((c) => c.id),
+              ),
+              eq(modules.status, "ready"),
+            ),
+          )
+          .all().length;
 
   // Furthest stage the course actually reached, so a retry does not redo the
   // interview because the writing failed.

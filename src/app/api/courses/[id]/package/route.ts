@@ -6,6 +6,7 @@ import { buildPackage } from "@/lib/package/format";
 import { slug, writePackage } from "@/lib/package/export";
 import { newId, now } from "@/lib/util/id";
 import { getCurrentUser } from "@/lib/auth/session";
+import { exportableFigures } from "@/lib/sources/figures";
 
 export const runtime = "nodejs";
 
@@ -39,11 +40,25 @@ export async function GET(
     return NextResponse.json({ error: "course not ready" }, { status: 409 });
   }
 
-  const pkg = buildPackage(bundle, {
-    author: null,
-    license: null,
-    exportedAt: now(),
-  });
+  // buildPackage refuses rather than returns when the package would carry a
+  // protected value in clear, and a refusal is a decision with a reason, not a
+  // crash. Uncaught it reached the browser as a bare 500: the author saw a
+  // generic error page, learned nothing, and had no way to tell a bug from a
+  // guard doing its job. The reason is the whole value of the check.
+  let pkg;
+  try {
+    pkg = buildPackage(bundle, {
+      author: null,
+      license: null,
+      exportedAt: now(),
+      figures: exportableFigures(bundle.course.id),
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "export refused" },
+      { status: 409 },
+    );
+  }
   db.insert(packages)
     .values({
       id: newId("pkg"),

@@ -1,9 +1,12 @@
 name: CI
 
 on:
+  # Every branch, deliberately, rather than a named one. A push filter naming a
+  # branch that does not exist in a given clone fails silently: nothing runs,
+  # nothing says so, and the workflow reads as coverage it is not providing.
   push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
   schedule:
     # A dependency that is safe today can have an advisory tomorrow, so the
     # audit runs on a clock as well as on a push.
@@ -27,6 +30,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Types
         run: pnpm typecheck
 
@@ -41,3 +47,80 @@ jobs:
 
       - name: Dependency advisories
         run: pnpm audit:deps
+
+
+  # Everything above runs on one operating system and one version of Node, and
+  # for a while that hid a product that could not be built on Windows at all and
+  # then could not stay running on it. The driver is a native module, so the
+  # combination of platform and Node version is not a detail: it decides which
+  # binary loads and how the runtime tears it down.
+  #
+  # This job starts the server, which nothing else here does. Both failures were
+  # invisible to tests because they were not test failures: the process aborted,
+  # once during the build and once about a second after reporting ready. The
+  # only check that catches that is one that runs the thing and looks again
+  # afterwards.
+  runtime:
+    # Never on a push, unlike the job above. Six combinations that each build
+    # the app and start a server is twenty minutes of wall clock, and minutes
+    # are billed on a private repository, where a macOS one counts as ten and a
+    # Windows one as two. On a busy day that costs more than a month's
+    # allowance.
+    #
+    # Gating on "push to the default branch" is not the answer either: in a
+    # clone where development happens on the default branch, that condition
+    # means every push after all.
+    #
+    # It runs where it earns its keep: on a pull request, on the weekly clock,
+    # and on demand from the Actions tab, which is what a release day needs.
+    if: github.event_name != 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Three platforms because the driver ships a different compiled binary
+        # for each, and macOS is arm64, so it is a third target rather than a
+        # variation on the first two. Two versions of Node because the runtime
+        # decides how that binary is torn down, and because installing "the
+        # LTS" today gets you 24, not the 22 this project was written against.
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Named separately from the start below so a failure says which half:
+      # collecting page data opens the database in parallel workers, and that
+      # is where the first of the two aborts landed.
+      - name: Build
+        run: pnpm build
+
+      # bash on both, so the path below means the same thing on Windows as it
+      # does on Linux.
+      - name: Probe the driver
+        shell: bash
+        run: node_modules/.bin/tsx scripts/db-probe.ts
+
+      # Started, left alone past the worker's first idle tick, then asked
+      # whether it is still there. The waiting is the test: the server answered
+      # requests perfectly well and died a second later.
+      - name: Start and stay up
+        shell: bash
+        run: |
+          pnpm start &
+          server=$!
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:3000/login && break
+            sleep 1
+          done
+          curl -sf -o /dev/null http://localhost:3000/login || { echo "never served a page"; exit 1; }
+          sleep 15
+          kill -0 "$server" 2>/dev/null || { echo "server died after serving; this is the abort"; exit 1; }
+          kill "$server" 2>/dev/null || true

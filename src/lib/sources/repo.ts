@@ -19,22 +19,62 @@ export function allowedRepoRoots(): string[] {
 }
 
 /**
+ * Two paths that name the same directory, on a filesystem that says so.
+ *
+ * Windows and macOS both match filenames without regard to case, so a root the
+ * operator typed as `C:\Code` and a path the OS reports as `C:\code` are one
+ * directory, and treating them as two denies the operator their own machine.
+ * Linux is case sensitive and gets an exact comparison, because there those
+ * really are two directories.
+ */
+const CASE_INSENSITIVE_FS =
+  process.platform === "win32" || process.platform === "darwin";
+
+function fold(p: string): string {
+  return CASE_INSENSITIVE_FS ? p.toLowerCase() : p;
+}
+
+/**
+ * The canonical form of a path: absolute, symlinks followed, short names
+ * expanded. Null when it does not exist, which denies rather than guesses.
+ */
+async function canonical(p: string): Promise<string | null> {
+  try {
+    return await realpath(resolve(p));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * True only if `rootDir` resolves (following symlinks) to inside an allowlisted
  * root. realpath collapses `..` and symlink escapes before the prefix check.
+ *
+ * Both sides go through realpath, which is the half that was missing. The
+ * candidate was canonicalised and the root was only resolved, so on Windows
+ * they could never match: realpath there expands 8.3 short names and returns
+ * the casing the filesystem actually holds, so a root under a temp directory
+ * came back as something spelled differently from what the operator set. The
+ * guard then denied every path on the machine. It failed closed, so nothing
+ * leaked; repository ingestion simply did not work on Windows at all.
  */
 export async function repoPathAllowed(rootDir: string): Promise<boolean> {
   const roots = allowedRepoRoots();
   if (roots.length === 0) return false;
-  let real: string;
-  try {
-    real = await realpath(rootDir);
-  } catch {
-    return false;
+  const real = await canonical(rootDir);
+  if (real === null) return false;
+
+  for (const base of roots) {
+    const b = await canonical(base);
+    // A root that does not exist allows nothing. Silently, because an operator
+    // typo must not turn into a wider allowlist than the one they wrote.
+    if (b === null) continue;
+    if (fold(real) === fold(b)) return true;
+    // The separator is what stops `<root>/src` from matching `<root>/src-evil`.
+    const prefix = b.endsWith(sep) ? b : b + sep;
+    if (fold(real).startsWith(fold(prefix))) return true;
   }
-  return roots.some((base) => {
-    const b = resolve(base);
-    return real === b || real.startsWith(b + sep);
-  });
+  return false;
 }
 
 /**
@@ -113,7 +153,7 @@ export async function walkRepo(
         if (SKIP_DIRS.has(e.name)) continue;
         await walk(abs, depth + 1);
       } else if (e.isFile() && keepFile(e.name)) {
-        let bytes = 0;
+        let bytes;
         try {
           bytes = (await stat(abs)).size;
         } catch {

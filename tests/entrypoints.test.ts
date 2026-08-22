@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 /**
  * Default-deny inventory of every way into the app.
@@ -71,6 +71,16 @@ const ACTOR = /withActor|currentActor/;
 describe("every entry point is accounted for", () => {
   const files = entryPoints(APP);
 
+  /**
+   * A file's name in the declared-public list, which is written with forward
+   * slashes because that is how a route reads. `relative` returns the
+   * platform's separator, so on Windows every path came back with backslashes,
+   * matched nothing in the list, and the guard reported all four public
+   * endpoints as unguarded while also calling the list stale. Two failures,
+   * one cause, and neither has anything to do with the auth it checks.
+   */
+  const key = (f: string): string => relative(APP, f).split(sep).join("/");
+
   it("finds the app's entry points at all", () => {
     // A guard on the guard: if the walk silently returned nothing, every
     // assertion below would pass while checking exactly zero files.
@@ -79,7 +89,7 @@ describe("every entry point is accounted for", () => {
 
   it("refuses anonymous callers unless the file is declared public", () => {
     const unguarded = files
-      .map((f) => relative(APP, f))
+      .map((f) => key(f))
       .filter((rel) => !(rel in PUBLIC_BY_DESIGN))
       .filter((rel) => !guarded(join(APP, rel)));
 
@@ -94,7 +104,7 @@ describe("every entry point is accounted for", () => {
   it("keeps the public list honest", () => {
     // A declared-public file that no longer exists means the list is stale and
     // is quietly excusing nothing, or worse, shadowing a renamed route.
-    const present = new Set(files.map((f) => relative(APP, f)));
+    const present = new Set(files.map((f) => key(f)));
     const stale = Object.keys(PUBLIC_BY_DESIGN).filter((p) => !present.has(p));
     expect(stale, `PUBLIC_BY_DESIGN lists files that no longer exist`).toEqual([]);
   });

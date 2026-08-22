@@ -117,6 +117,23 @@ describe("renderMarkdown", () => {
     }
   });
 
+  it("marks a value it could not unseal instead of deleting the word", () => {
+    // openSecret returns an empty string when a row is sealed and
+    // FERRATA_SECRET_KEY is not set. Substituting that would turn "reach
+    // 10.0.0.5 from the jump host" into "reach  from the jump host", which
+    // reads as a typo rather than as something withheld, so nobody would go
+    // looking for a gap they cannot see.
+    const html = renderMarkdown("Connettiti a ⟨cxt:9f2a1b3c4d⟩ in SSH.", {
+      restorations: [
+        { token: "⟨cxt:9f2a1b3c4d⟩", value: "", label: "Private IP address" },
+      ],
+    });
+    expect(html).toContain("•••");
+    expect(html).toContain("FERRATA_SECRET_KEY");
+    expect(html).not.toContain("cxt:9f2a1b3c4d");
+    expect(html).toContain("Connettiti a ");
+  });
+
   it("collapses an orphan token to a neutral marker, never raw syntax", () => {
     const html = renderMarkdown("L'host ⟨cxt:deadbeef00⟩ risponde.", {
       restorations: [

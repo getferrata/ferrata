@@ -16,6 +16,11 @@ export interface WriteModuleArgs {
   startLevel: string;
   sourcePrompt: string;
   concretenessRule: string;
+  /**
+   * The author's interview answers, verbatim. Trusted: their own words, like
+   * the brief, unlike the material.
+   */
+  authorContext: string;
   conceptTitle: string;
   conceptSummary: string;
   depthLevel: number;
@@ -75,6 +80,7 @@ export async function runWriteModule(
       startLevel: args.startLevel,
       sourcePrompt: args.sourcePrompt,
       concretenessRule: args.concretenessRule,
+      authorContext: args.authorContext.trim() || "(no interview answers)",
       conceptTitle: args.conceptTitle,
       conceptSummary: args.conceptSummary,
       depthLevel: String(args.depthLevel),

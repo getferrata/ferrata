@@ -26,11 +26,27 @@ interface Report {
   errors: { task: string; message: string }[];
 }
 
+interface PublishableRow {
+  model: string;
+  provider: string;
+  ferrataVersion: string;
+  stagesOk: number;
+  stagesTotal: number;
+  verdict: "clean" | "wasteful" | "broken";
+  totalUsd: number;
+  totalCalls: number;
+  wastedCalls: number;
+  reasons: string[];
+  missing: string[];
+}
+
 interface Poll {
   jobId?: string;
   status: "none" | "queued" | "running" | "done" | "failed";
   error?: string | null;
   report?: Report | null;
+  /** The shareable reduction of the same run, built server side. */
+  publishable?: PublishableRow | null;
 }
 
 const STAGE_LABEL: Record<string, string> = {
@@ -145,12 +161,20 @@ export function PreflightPanel() {
         </p>
       ) : null}
 
-      {report ? <Verdict report={report} /> : null}
+      {report ? (
+        <Verdict report={report} publishable={poll?.publishable ?? null} />
+      ) : null}
     </section>
   );
 }
 
-function Verdict({ report }: { report: Report }) {
+function Verdict({
+  report,
+  publishable,
+}: {
+  report: Report;
+  publishable: PublishableRow | null;
+}) {
   const tone =
     report.verdict === "clean"
       ? "text-state-solid"
@@ -253,6 +277,49 @@ function Verdict({ report }: { report: Report }) {
           follows the format more closely.
         </p>
       ) : null}
+
+      {publishable ? <Publish row={publishable} /> : null}
     </div>
+  );
+}
+
+/**
+ * The same run, reduced to the line somebody else could use.
+ *
+ * Every operator pays to learn the same thing about the same model. This is the
+ * part of that answer that is about Ferrata and the model rather than about
+ * this install, so it can be shared. Copied by hand and posted wherever the
+ * operator likes: nothing here sends anything anywhere, which is the only
+ * version of opt-in that cannot be got wrong.
+ */
+function Publish({ row }: { row: PublishableRow }) {
+  const [copied, setCopied] = useState(false);
+  const line = `| ${row.model} | ${row.provider} | ${row.stagesOk}/${row.stagesTotal} | ${row.verdict} | ${row.totalUsd > 0 ? `$${row.totalUsd.toFixed(4)}` : "free"} | ${row.wastedCalls} | ${row.ferrataVersion} |`;
+
+  return (
+    <details className="mt-8 rounded border border-border p-4">
+      <summary className="cursor-pointer text-step--1 text-text-muted">
+        Share this result
+      </summary>
+      <p className="mt-3 max-w-measure text-step--1 text-text-muted">
+        Which stages held, what the built-in fixture cost, how many calls were
+        thrown away, and the version of Ferrata that measured it. No course, no
+        key, no identifier, and nothing about anything else this install has
+        spent. Change a prompt in a later version and the same model can score
+        differently, which is why the version travels with the numbers.
+      </p>
+      <pre className="mt-3 overflow-x-auto rounded bg-bg-subtle p-3 text-step--2">
+        {line}
+      </pre>
+      <button
+        type="button"
+        onClick={() => {
+          void navigator.clipboard.writeText(line).then(() => setCopied(true));
+        }}
+        className="mt-3 rounded border border-border px-3 py-1.5 text-step--1 hover:bg-bg"
+      >
+        {copied ? "Copied" : "Copy the row"}
+      </button>
+    </details>
   );
 }

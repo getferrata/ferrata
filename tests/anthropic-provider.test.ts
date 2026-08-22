@@ -105,7 +105,12 @@ describe("a model that refuses temperature", () => {
       )
       .mockResolvedValueOnce(jsonResponse(OK));
     const out = await new AnthropicProvider().complete(req, "claude-sonnet-5");
-    expect(out.usage).toEqual({ tokensIn: 10, tokensOut: 5 });
+    expect(out.usage).toEqual({
+      tokensIn: 10,
+      tokensOut: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
   });
 });
 
@@ -124,5 +129,95 @@ describe("truncation signal", () => {
     );
     const out = await new AnthropicProvider().complete(req, "claude-sonnet-5");
     expect(out.truncated).toBe(false);
+  });
+});
+
+describe("the cache breakpoint", () => {
+  /** A stable prefix long enough to clear the provider's caching minimum. */
+  const longStable = "You are a stage of Ferrata. ".repeat(700);
+
+  it("marks the stable half and leaves the per-call half unmarked", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(OK));
+    await new AnthropicProvider().complete(
+      { ...req, system: { stable: longStable, perCall: "Concept: BGP" } },
+      "claude-sonnet-5",
+    );
+
+    const system = sentBodies(fetchSpy)[0]!.system as {
+      text: string;
+      cache_control?: unknown;
+    }[];
+    expect(system).toHaveLength(2);
+    expect(system[0]!.cache_control).toEqual({ type: "ephemeral" });
+    expect(system[1]!.text).toBe("Concept: BGP");
+    // The whole point: what changes per module sits after the breakpoint, so it
+    // never shifts the prefix the cache is keyed on.
+    expect(system[1]!.cache_control).toBeUndefined();
+  });
+
+  it("asks for no cache when the prefix is too short to get one", async () => {
+    // A breakpoint under the provider's minimum is not free: it is priced as a
+    // write attempt, so a short prompt would pay the premium for a cache that
+    // is never created and never read.
+    fetchSpy.mockResolvedValueOnce(jsonResponse(OK));
+    await new AnthropicProvider().complete(
+      { ...req, system: { stable: "Be brief.", perCall: "Concept: BGP" } },
+      "claude-sonnet-5",
+    );
+
+    const system = sentBodies(fetchSpy)[0]!.system as {
+      cache_control?: unknown;
+    }[];
+    expect(system[0]!.cache_control).toBeUndefined();
+  });
+
+  it("keeps the JSON-mode line inside the cached block", async () => {
+    // It is a constant. Appended after the breakpoint it would be paid for at
+    // full price on every call, for nothing.
+    fetchSpy.mockResolvedValueOnce(jsonResponse(OK));
+    await new AnthropicProvider().complete(
+      { ...req, system: { stable: longStable, perCall: "x" }, jsonMode: true },
+      "claude-sonnet-5",
+    );
+
+    const system = sentBodies(fetchSpy)[0]!.system as { text: string }[];
+    expect(system[0]!.text).toContain("single valid JSON value");
+    expect(system[1]!.text).toBe("x");
+  });
+
+  it("sends one unmarked block for a prompt that declared no split", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(OK));
+    await new AnthropicProvider().complete(
+      { ...req, system: longStable },
+      "claude-sonnet-5",
+    );
+
+    const system = sentBodies(fetchSpy)[0]!.system as {
+      cache_control?: unknown;
+    }[];
+    expect(system).toHaveLength(1);
+    expect(system[0]!.cache_control).toBeUndefined();
+  });
+
+  it("counts cached tokens back into the prompt size", async () => {
+    // The API reports the uncached remainder in input_tokens and the cached
+    // spans beside it. Left as-is, a cache hit would look like the prompt had
+    // shrunk, and every figure built on tokensIn would quietly disagree with
+    // the runs measured before caching existed.
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        content: [{ type: "text", text: "{}" }],
+        usage: {
+          input_tokens: 200,
+          output_tokens: 50,
+          cache_read_input_tokens: 4000,
+          cache_creation_input_tokens: 0,
+        },
+      }),
+    );
+    const out = await new AnthropicProvider().complete(req, "claude-sonnet-5");
+    expect(out.usage.tokensIn).toBe(4200);
+    expect(out.usage.cacheReadTokens).toBe(4000);
+    expect(out.usage.cacheWriteTokens).toBe(0);
   });
 });
