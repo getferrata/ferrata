@@ -124,3 +124,25 @@ jobs:
           sleep 15
           kill -0 "$server" 2>/dev/null || { echo "server died after serving; this is the abort"; exit 1; }
           kill "$server" 2>/dev/null || true
+
+  # A fresh install passing says nothing about someone on 1.2.0. This builds a
+  # database with data in it from each published release, runs this checkout's
+  # migrations over it, and compares the result with a fresh install. It needs
+  # the tags, hence the full history. Same trigger as the job above, and for the
+  # same reason: it costs minutes that a push does not need to spend.
+  upgrade:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Upgrade from every release
+        run: pnpm check:upgrade

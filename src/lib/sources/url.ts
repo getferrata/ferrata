@@ -56,22 +56,76 @@ function allowPrivate(): boolean {
   return process.env.FERRATA_ALLOW_PRIVATE_URLS === "1";
 }
 
+function isPrivateV4(p: readonly number[]): boolean {
+  const [a, b, c] = p as [number, number, number, number];
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 169 && b === 254) return true; // link-local incl. 169.254.169.254
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // IETF + TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+  if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
+  if (a >= 224) return true; // multicast / reserved
+  return false;
+}
+
+/** The 16 bytes of an IPv6 literal, or null when it is not one. */
+function v6Bytes(raw: string): number[] | null {
+  let s = raw.toLowerCase();
+  const zone = s.indexOf("%");
+  if (zone !== -1) s = s.slice(0, zone);
+  // A dotted tail ("::ffff:1.2.3.4") is two groups written as an IPv4 address.
+  const dot = s.lastIndexOf(":");
+  const tail = s.slice(dot + 1);
+  if (tail.includes(".")) {
+    if (isIP(tail) !== 4) return null;
+    const q = tail.split(".").map(Number);
+    s = s.slice(0, dot + 1) + ((q[0]! << 8) | q[1]!).toString(16) + ":" + ((q[2]! << 8) | q[3]!).toString(16);
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string): number[] | null =>
+    part === "" ? [] : part.split(":").map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN));
+  const head = parse(halves[0]!);
+  const rest = halves.length === 2 ? parse(halves[1]!) : [];
+  if (!head || !rest) return null;
+  const missing = 8 - head.length - rest.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array<number>(halves.length === 2 ? missing : 0).fill(0), ...rest];
+  if (groups.length !== 8 || groups.some(Number.isNaN)) return null;
+  return groups.flatMap((g) => [g >> 8, g & 255]);
+}
+
 /** True for loopback, link-local, private, and reserved ranges (v4 + v6). */
 export function isPrivateIp(ip: string): boolean {
-  if (isIP(ip) === 4) {
-    const p = ip.split(".").map(Number) as [number, number, number, number];
-    if (p[0] === 10 || p[0] === 127 || p[0] === 0) return true;
-    if (p[0] === 169 && p[1] === 254) return true; // link-local incl. 169.254.169.254
-    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
-    if (p[0] === 192 && p[1] === 168) return true;
-    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true; // CGNAT
-    if (p[0] >= 224) return true; // multicast / reserved
-    return false;
+  const kind = isIP(ip);
+  if (kind === 4) return isPrivateV4(ip.split(".").map(Number));
+  // Anything that is not a literal we can read is refused: failing closed.
+  const b = kind === 6 || ip.includes(":") ? v6Bytes(ip) : null;
+  if (!b) return true;
+  const embedded = (at: number) => b.slice(at, at + 4);
+  const zeros = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+  if (zeros(0, 15) && (b[15] === 0 || b[15] === 1)) return true; // :: and ::1
+  // ::a.b.c.d (deprecated v4-compatible) and ::ffff:a.b.c.d (v4-mapped): the
+  // address is the embedded IPv4 one, however it was spelled.
+  if (zeros(0, 12)) return isPrivateV4(embedded(12));
+  if (zeros(0, 10) && b[10] === 0xff && b[11] === 0xff) return isPrivateV4(embedded(12));
+  if (zeros(0, 8) && b[8] === 0xff && b[9] === 0xff && b[10] === 0 && b[11] === 0) {
+    return isPrivateV4(embedded(12)); // ::ffff:0:a.b.c.d (SIIT)
   }
-  const s = ip.toLowerCase();
-  if (s === "::1" || s === "::") return true;
-  if (s.startsWith("::ffff:")) return isPrivateIp(s.slice(7)); // v4-mapped
-  if (s.startsWith("fe80") || s.startsWith("fc") || s.startsWith("fd")) return true;
+  // NAT64 64:ff9b::/96 and 6to4 2002::/16 carry an IPv4 address that a gateway
+  // will connect to, so they are as private as the address inside them.
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zeros(4, 12)) {
+    return isPrivateV4(embedded(12));
+  }
+  if (b[0] === 0x20 && b[1] === 0x02) return isPrivateV4(embedded(2));
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0 && b[3] === 0) return true; // Teredo
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true; // documentation
+  if ((b[0]! & 0xfe) === 0xfc) return true; // fc00::/7 unique local
+  if (b[0] === 0xfe && (b[1]! & 0xc0) >= 0x80) return true; // fe80::/10 link-local, fec0::/10 site-local
+  if (b[0] === 0xff) return true; // multicast
   return false;
 }
 

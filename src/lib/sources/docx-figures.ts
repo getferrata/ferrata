@@ -1,4 +1,5 @@
 import type { ExtractedFigure } from "./figures";
+import { assertReasonableZip } from "./inflate-guard";
 
 /**
  * Pull the pictures out of a .docx, with a marker left where each one sat.
@@ -48,6 +49,7 @@ function altTextOf(image: unknown): string | null {
 }
 
 export async function extractDocxFigures(buf: Buffer): Promise<DocxFigures> {
+  assertReasonableZip(buf);
   const mammoth = await import("mammoth");
   const found: ExtractedFigure[] = [];
 

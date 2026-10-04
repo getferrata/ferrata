@@ -39,7 +39,19 @@ function bucketFor(key: string, at: number): Bucket {
     for (const [k, b] of buckets) {
       if (at - b.since >= WINDOW_MS) buckets.delete(k);
     }
-    if (buckets.size >= MAX_KEYS) buckets.clear();
+    // Still full of live windows: make room by dropping the oldest ones that
+    // are NOT blocked. Clearing the table here let anyone inventing
+    // MAX_KEYS emails wipe the block on the account they were guessing.
+    if (buckets.size >= MAX_KEYS) {
+      for (const [k, b] of buckets) {
+        if (b.blockedUntil <= at) buckets.delete(k);
+        if (buckets.size < MAX_KEYS * 0.9) break;
+      }
+    }
+    if (buckets.size >= MAX_KEYS) {
+      const oldest = buckets.keys().next().value;
+      if (oldest !== undefined) buckets.delete(oldest);
+    }
   }
   buckets.set(key, fresh);
   return fresh;

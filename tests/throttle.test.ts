@@ -141,3 +141,18 @@ describe("clientKey", () => {
     expect(clientKey(new Request("http://x/"))).toBeNull();
   });
 });
+
+describe("a flood of new keys does not buy a guesser a fresh start", () => {
+  it("keeps a tripped block when the table fills with junk keys", () => {
+    // The table is capped so it cannot grow forever. When it filled it used to
+    // be cleared outright, counters for blocked accounts included: inventing
+    // 10,000 emails wiped the lock on the one being guessed.
+    const target = "login:email:victim@x.dev";
+    for (let i = 0; i < 8; i++) recordFailure(target);
+    expect(checkThrottle(target).allowed).toBe(false);
+
+    for (let i = 0; i < 12_000; i++) recordFailure(`login:email:junk${i}@x.dev`);
+
+    expect(checkThrottle(target).allowed).toBe(false);
+  });
+});
