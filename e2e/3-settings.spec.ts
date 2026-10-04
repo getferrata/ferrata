@@ -50,7 +50,11 @@ test("students cannot reach settings", async ({ browser }) => {
   const page = await ctx.newPage();
   await page.goto("/settings");
   await expect(page.getByText("Off the route")).toBeVisible();
-  const api = await ctx.request.get("/api/settings/llm");
+  // The e2e server is `next dev`, which compiles a route the first time it is
+  // asked for. CI has twice answered this first direct request with a reset
+  // connection (read ECONNRESET), never reproduced locally. maxRetries retries
+  // that one error and nothing else, so the 403 is still what is asserted.
+  const api = await ctx.request.get("/api/settings/llm", { maxRetries: 3 });
   expect(api.status()).toBe(403);
   await ctx.close();
 });
