@@ -1,5 +1,6 @@
 "use client";
 
+import { formatBytes } from "@/lib/http/upload-limits";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -153,7 +154,10 @@ export default function CreatePage() {
       fd.append("contextia", contextia);
       for (const f of files) fd.append("files", f);
       const res = await fetch("/api/courses", { method: "POST", body: fd });
-      if (!res.ok) throw new Error(`Error ${res.status}`);
+      if (!res.ok) {
+        const why = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(why?.error ?? `Error ${res.status}`);
+      }
       const data = (await res.json()) as { id: string };
       router.push(`/courses/${data.id}`);
     } catch (err) {
@@ -350,7 +354,7 @@ export default function CreatePage() {
                     <span className="min-w-0 truncate text-text">{f.name}</span>
                     <span className="flex shrink-0 items-center gap-3">
                       <span className="font-mono text-text-muted">
-                        {(f.size / 1024).toFixed(0)} KB
+                        {formatBytes(f.size)}
                       </span>
                       <button
                         type="button"

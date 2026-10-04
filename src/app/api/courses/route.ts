@@ -1,3 +1,12 @@
+import {
+  MAX_FILE_BYTES,
+  MAX_FILES,
+  MAX_TOTAL_BYTES,
+  NOT_A_FORM_MESSAGE,
+  TOTAL_TOO_LARGE_MESSAGE,
+  oversizeFiles,
+  oversizeMessage,
+} from "@/lib/http/upload-limits";
 import { placeholderTitle } from "@/lib/course/placeholder-title";
 import { NextResponse } from "next/server";
 import { cappedFormData } from "@/lib/http/body";
@@ -16,9 +25,6 @@ import { isAbsolute } from "node:path";
 
 export const runtime = "nodejs";
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
-const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // whole request, checked before parsing
-const MAX_FILES = 20;
 const MAX_PROMPT_CHARS = 20_000;
 const MAX_STUDY_HOURS = 2000;
 
@@ -48,13 +54,22 @@ export async function POST(req: Request): Promise<NextResponse> {
   const parsed = await cappedFormData(req, MAX_TOTAL_BYTES);
   if (!parsed.ok) {
     return parsed.reason === "too_large"
-      ? NextResponse.json({ error: "upload too large" }, { status: 413 })
+      ? NextResponse.json({ error: TOTAL_TOO_LARGE_MESSAGE }, { status: 413 })
       : NextResponse.json(
-          { error: "expected multipart form" },
+          { error: NOT_A_FORM_MESSAGE },
           { status: 400 },
         );
   }
   const form = parsed.form;
+
+  // Refused by name before anything is created. A file over the limit used to be
+  // skipped without a word, and the course was built from whatever was left.
+  const over = oversizeFiles(
+    form.getAll("files").filter((f): f is File => f instanceof File),
+  );
+  if (over.length > 0) {
+    return NextResponse.json({ error: oversizeMessage(over) }, { status: 413 });
+  }
 
   // A course needs a brief OR material, not necessarily both: with material
   // alone, the interview extracts the goal and audience instead of us
