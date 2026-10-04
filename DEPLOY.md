@@ -273,9 +273,27 @@ With the sqlite3 binary installed, this is the same operation:
 sqlite3 /var/lib/ferrata/ferrata.db ".backup /backups/ferrata-$(date +%F).db"
 ```
 
-Restoring is stopping the service, copying the file back, and starting it again.
+Restoring is stopping the service, removing the old log files, copying the file
+back, and starting it again:
+
+```bash
+sudo systemctl stop ferrata
+rm -f /var/lib/ferrata/ferrata.db-wal /var/lib/ferrata/ferrata.db-shm
+cp /backups/ferrata-2026-01-01.db /var/lib/ferrata/ferrata.db
+sudo systemctl start ferrata
+```
+
 Stop first: replacing `ferrata.db` under a running process leaves it with a WAL
-belonging to the database you just removed.
+belonging to the database you just removed. The `rm` is just as necessary after
+a crash, which leaves the old `-wal` behind: copying only `ferrata.db` over it
+does not fail, the stale log is replayed on top of the backup, and what opens is
+neither the backup nor the old database. Migrations run at start, so a backup
+from an older release is brought up to date.
+
+A backup holds the database and nothing else. Provider keys and wiki tokens in
+it are encrypted with `FERRATA_SECRET_KEY`, which is not in the backup: restore
+onto a new machine with the same key, or those values cannot be decrypted and
+have to be entered again.
 
 ## 8. Update
 
