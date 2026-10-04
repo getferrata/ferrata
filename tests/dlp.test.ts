@@ -220,3 +220,65 @@ describe("addresses an RFC fixes, through the real detector", () => {
     expect(scan.restorations.map((r) => r.value)).toEqual(["10.20.34.7"]);
   });
 });
+
+describe("personal data, which the interface says never reaches the model", () => {
+  // The create page promises that "Secrets (keys, tokens, PII) are removed before
+  // any model sees them". The engine ships its personal-data detectors switched
+  // off, and only the infrastructure ones had been switched back on, so email
+  // addresses, phone numbers and card numbers went to the provider untouched.
+  // Found by planting them in a runbook and reading what the model was sent.
+  //
+  // The engine reads an IBAN and a phone number only in their compact forms
+  // (GB82WEST12345698765432, +390212345678), not with spaces or separators. That
+  // is the engine's limit, not this module's, so the sample uses the forms it
+  // reads and the interface says what it covers.
+  const SAMPLE = [
+    "Escalate to Marta Rossi (marta.rossi@acme-payments.com) or luca.bianchi@acme-payments.com.",
+    "Call +390212345678 out of hours.",
+    "Test card 4111111111111111, IBAN GB82WEST12345698765432.",
+    "US contact record: SSN 078-05-1120.",
+  ].join("\n");
+
+  it("keeps email addresses, phone numbers, cards, IBANs and SSNs out of the text sent on", async () => {
+    const r = await scanSensitivity(SAMPLE, "contacts.md");
+    for (const value of [
+      "marta.rossi@acme-payments.com",
+      "luca.bianchi@acme-payments.com",
+      "+390212345678",
+      "4111111111111111",
+      "GB82WEST12345698765432",
+      "078-05-1120",
+    ]) {
+      expect(r.text, value).not.toContain(value);
+    }
+  });
+
+  it("restores contact details for the student, but never a card, an IBAN or an SSN", async () => {
+    const r = await scanSensitivity(SAMPLE, "contacts.md");
+    const restored = r.restorations.map((x) => x.value);
+    // Who to call is the point of an onboarding course: the model does not see
+    // it, the student does.
+    expect(restored).toContain("marta.rossi@acme-payments.com");
+    expect(restored).toContain("+390212345678");
+    // These are never needed by a reader and never come back.
+    for (const never of ["4111111111111111", "GB82WEST12345698765432", "078-05-1120"]) {
+      expect(restored, never).not.toContain(never);
+    }
+    expect(r.verdict?.redactions).toBeGreaterThanOrEqual(3);
+  });
+
+  it("leaves the addresses RFC 2606 reserves for documentation alone", async () => {
+    const text = "Set user.email to jane@example.com, or admin@example.org in the sample.";
+    const r = await scanSensitivity(text, "git-howto.md");
+    expect(r.text).toBe(text);
+    expect(r.restorations).toHaveLength(0);
+  });
+
+  it("only asks the engine for detectors it actually has", async () => {
+    // A renamed detector in an engine upgrade would silently stop protecting.
+    const { detectors } = await import("@sbr0nch/contextia-engine");
+    const { REQUIRED_DETECTORS } = await import("@/lib/sources/dlp");
+    const have = new Set(detectors.map((d) => d.id));
+    for (const id of REQUIRED_DETECTORS) expect(have.has(id), id).toBe(true);
+  });
+});

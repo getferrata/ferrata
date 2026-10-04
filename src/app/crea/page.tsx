@@ -61,7 +61,7 @@ const DEPTHS: { key: Depth; label: string; hint: string }[] = [
 ];
 
 const MODES: { key: Contextia; label: string; hint: string }[] = [
-  { key: "redact", label: "Protected", hint: "Recommended. Secrets (keys, tokens, PII) are removed before any model sees them. Internal IPs and server names are hidden from the model and restored into the finished course, marked as protected." },
+  { key: "redact", label: "Protected", hint: "Recommended. Secrets (keys, tokens), cards, IBANs and national ID numbers are removed before any model sees them. Internal IPs, server names, email addresses and +international phone numbers are hidden from the model and restored into the finished course, marked as protected." },
   { key: "block", label: "Block secrets", hint: "Like Protected, but a source containing critical secrets is refused. You clean it and re-upload." },
   { key: "off", label: "Off", hint: "No scan: text passes through untouched. Only for material you've already cleaned. Secrets can reach the model." },
 ];

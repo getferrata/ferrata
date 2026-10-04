@@ -54,6 +54,10 @@ export const WELL_KNOWN_PATTERNS: readonly string[] = [
   String.raw`^203\.0\.113\.\d{1,3}$`,
   // RFC 3849: the same idea for IPv6.
   String.raw`^2001:0?db8:`,
+  // RFC 2606 and RFC 6761: domains reserved for examples and tests, so an address
+  // under them names nobody. Every how-to that mentions git config or a mail
+  // setting uses one.
+  String.raw`^[^@\s]+@(?:[a-z0-9-]+\.)*(?:example\.(?:com|org|net)|example|test|invalid|localhost)$`,
 ];
 
 const COMPILED = WELL_KNOWN_PATTERNS.map((p) => new RegExp(p, "i"));
