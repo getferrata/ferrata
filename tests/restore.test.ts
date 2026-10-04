@@ -50,7 +50,16 @@ describe("losing the machine and getting the course back", () => {
       writer.stdout.on("data", (d) => (out += d));
       writer.on("close", () => res(Number(out.trim())));
     });
-    await new Promise((r) => setTimeout(r, 1500)); // let it get going
+    // Until it has really written, not for a fixed time: a cold start of the
+    // writer under load took longer than any number picked in advance.
+    for (const start = Date.now(); ; ) {
+      const probe = new Database(live, { readonly: true });
+      const rows = (probe.prepare("select count(*) n from llm_calls").get() as { n: number }).n;
+      probe.close();
+      if (rows >= 100) break;
+      if (Date.now() - start > 90_000) throw new Error("the writer never got going");
+      await new Promise((r) => setTimeout(r, 250));
+    }
 
     // Rows the writer has already committed. They live in the write-ahead log,
     // not yet in the main file, so a copy of the file alone silently lacks them:
