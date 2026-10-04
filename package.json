@@ -30,6 +30,7 @@
     "test:e2e": "playwright test",
     "db:seed:demo": "tsx src/db/seed-demo.ts",
     "audit:deps": "node scripts/audit-deps.mjs",
+    "check:upgrade": "node scripts/upgrade-from-releases.mjs",
     "audit:invariants": "tsx scripts/check-invariants.ts",
     "preflight:row": "tsx scripts/preflight-row.ts",
     "db:probe": "tsx scripts/db-probe.ts",
