@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/format-date";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -152,7 +154,7 @@ export function AccountInvites({ pending }: { pending: PendingInviteView[] }) {
                 {p.role === "examiner" ? "Author" : "Student"}
                 {p.courseTitle ? ` · ${p.courseTitle}` : ""}
                 <span className="ml-2 text-text-muted">
-                  expires {new Date(p.expiresAt).toLocaleString()}
+                  expires {formatDateTime(p.expiresAt)}
                 </span>
               </span>
               <button

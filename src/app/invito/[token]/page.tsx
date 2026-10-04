@@ -1,3 +1,4 @@
+import { formatDateTime } from "@/lib/format-date";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -123,7 +124,7 @@ export default async function InvitePage({
       </p>
       <p className="mt-3 text-step--1 text-text-muted">
         This link works once, and only until{" "}
-        {new Date(invite.expiresAt).toLocaleString()}.
+        {formatDateTime(invite.expiresAt)}.
       </p>
       <div className="mt-8 flex flex-wrap gap-4">
         <Link

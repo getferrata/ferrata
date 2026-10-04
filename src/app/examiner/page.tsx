@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format-date";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
@@ -163,7 +164,7 @@ function Roster({
               </td>
               <td className="py-2.5 pr-4 text-text-muted">
                 {s.deadline
-                  ? new Date(s.deadline).toLocaleDateString("it-IT")
+                  ? formatDate(s.deadline)
                   : "-"}
               </td>
               <td className="py-2.5 text-right">
