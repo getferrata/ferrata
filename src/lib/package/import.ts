@@ -18,9 +18,17 @@ export function parsePackage(raw: unknown): FerrataPackage {
   const parsed = ferrataPackageSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
-    throw new Error(
-      `Pacchetto non valido${first ? `: ${first.path.join(".")} (${first.message})` : ""}`,
-    );
+    // In the interface's own language, and in words about the file rather than the
+    // validator's: "manifest (Required)" says nothing to somebody who picked the
+    // wrong file.
+    const where = first?.path.join(".");
+    const what =
+      first === undefined
+        ? ""
+        : first.message === "Required"
+          ? ` (${where} is missing)`
+          : ` (${where}: ${first.message.toLowerCase()})`;
+    throw new Error(`This is not a valid Ferrata package${what}.`);
   }
   return parsed.data;
 }
