@@ -1,3 +1,4 @@
+import { placeholderTitle } from "@/lib/course/placeholder-title";
 import { NextResponse } from "next/server";
 import { cappedFormData } from "@/lib/http/body";
 import { formString } from "@/lib/http/form";
@@ -169,7 +170,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       // Intake replaces this with the real title it derives.
       title:
         prompt.length >= 10
-          ? sourcePrompt.slice(0, 80)
+          ? placeholderTitle(sourcePrompt)
           : "New route (from material)",
       sourcePrompt,
       origin: "local",
