@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { users } from "@/db/schema";
-import { verifyPassword } from "@/lib/auth/password";
+import { authenticate } from "@/lib/auth/authenticate";
+import { withHashSlot } from "@/lib/auth/gate";
 import { createSession } from "@/lib/auth/session";
 import { enrollByInvite } from "@/lib/course/invite";
 import {
@@ -47,9 +45,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
   }
 
-  const user = db.select().from(users).where(eq(users.email, email)).get();
-  // Same generic error whether the email exists or the password is wrong.
-  if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
+  // Same generic error, and the same time, whether the email exists or not.
+  const outcome = await withHashSlot(async () => ({
+    user: await authenticate(email, parsed.data.password),
+  }));
+  if (!outcome) {
+    return NextResponse.json(
+      { error: "Too many sign-ins at once. Try again in a moment." },
+      { status: 429, headers: { "retry-after": "5" } },
+    );
+  }
+  const user = outcome.user;
+  if (!user) {
     for (const key of keys) recordFailure(key);
     return NextResponse.json(
       { error: "Incorrect email or password." },

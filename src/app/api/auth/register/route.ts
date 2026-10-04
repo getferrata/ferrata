@@ -81,6 +81,9 @@ export async function POST(req: Request): Promise<NextResponse> {
         refusal = {
           error: "An account with this email already exists.",
           status: 409,
+          // Counted like the other refusals: it is a yes/no answer about a
+          // person, and unlimited it lists every address that has an account.
+          throttle: true,
         };
         throw new Error("abort");
       }

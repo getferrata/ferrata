@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
 import { mayAdminister } from "@/lib/auth/operator";
-import { hashPassword } from "@/lib/auth/password";
+import { resetPassword } from "@/lib/auth/reset";
 import { getLogger } from "@/lib/log";
 
 const log = getLogger("auth");
@@ -36,12 +35,8 @@ export async function POST(
   const target = db.select().from(users).where(eq(users.id, id)).get();
   if (!target) return NextResponse.json({ error: "user not found" }, { status: 404 });
 
-  // Readable temporary password (base64url of 9 bytes, about 12 chars).
-  const temp = randomBytes(9).toString("base64url");
-  db.update(users)
-    .set({ passwordHash: await hashPassword(temp) })
-    .where(eq(users.id, id))
-    .run();
+  const temp = await resetPassword(id);
+  if (!temp) return NextResponse.json({ error: "user not found" }, { status: 404 });
   // Leaves a trace on purpose: a password reset is the one action here that
   // transfers control of an account, so it should not be possible to do it
   // quietly.
