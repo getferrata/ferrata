@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { FerrataMark } from "@/components/brand";
+import { COOKIE_REFUSED_MESSAGE, sessionWasKept } from "@/lib/auth/cookie";
 
 type Mode = "login" | "register";
 
@@ -48,6 +49,12 @@ export function AuthForm({
         courseId?: string;
       };
       if (!res.ok) throw new Error(data.error ?? `Error ${res.status}`);
+      // The server says yes; whether the browser kept the cookie is a separate
+      // question, and when it did not the next page load just bounces back here.
+      const me: unknown = await fetch("/api/auth/me")
+        .then((r) => r.json())
+        .catch(() => null);
+      if (!sessionWasKept(me)) throw new Error(COOKIE_REFUSED_MESSAGE);
       // A full page load, not a client-side push: the session is a cookie the
       // server reads while rendering, and a soft navigation can paint a page
       // that was prepared before the cookie existed, which looked like the

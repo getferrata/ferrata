@@ -86,6 +86,7 @@ same options are available as environment variables in `.env.local`:
 | `FERRATA_MODEL_HEAVY` / `FERRATA_MODEL_LIGHT` | one model per tier, addressed as `provider/model`, e.g. `anthropic/claude-opus-5` or `ollama/qwen2.5:7b`. Set, nothing is inferred |
 | `FERRATA_DB_PATH` | SQLite database location (default `./ferrata.db`) |
 | `FERRATA_ALLOW_PRIVATE_URLS=1` | allow fetching wiki links on private addresses (self-hosted networks) |
+| `FERRATA_INSECURE_COOKIES=1` | keep the session cookie working over plain http on an address other than localhost (a trusted network only; see DEPLOY.md, section 4) |
 | `FERRATA_REPO_ROOTS` | allowlisted roots for local repository ingestion |
 | `FERRATA_SECRET_KEY` | encrypts stored provider keys and wiki tokens at rest, and salts protected-value tokens |
 | `FERRATA_OPEN_REGISTRATION` | `1` reopens sign-up; closed by default after the first account |

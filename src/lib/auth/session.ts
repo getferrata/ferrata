@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { authSessions, users, type UserRole } from "@/db/schema";
 import { newId, now } from "@/lib/util/id";
+import { sessionCookieOptions } from "@/lib/auth/cookie";
 
 const COOKIE = "ferrata_session";
 const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -28,13 +29,7 @@ export async function createSession(userId: string): Promise<void> {
     .values({ id: hash(token), userId, expiresAt: now() + TTL_MS })
     .run();
   const jar = await cookies();
-  jar.set(COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: Math.floor(TTL_MS / 1000),
-  });
+  jar.set(COOKIE, token, sessionCookieOptions(Math.floor(TTL_MS / 1000)));
 }
 
 export async function destroySession(): Promise<void> {
