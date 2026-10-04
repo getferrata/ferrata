@@ -133,3 +133,47 @@ describe("web credentials host matching", () => {
     expect(hostMatches("acme.com", "notacme.com")).toBe(false);
   });
 });
+
+describe("the SSRF guard sees through IPv6 spellings of private IPv4 addresses", () => {
+  // Node writes http://[::ffff:127.0.0.1]/ as [::ffff:7f00:1]. The guard used to
+  // strip "::ffff:" and test what was left ("7f00:1") as if it were an IPv4
+  // address, found nothing wrong with it, and let loopback, the cloud metadata
+  // address and the whole private range through. Every case below was ALLOWED.
+  const MUST_BLOCK = [
+    "http://[::ffff:127.0.0.1]/",
+    "http://[::ffff:169.254.169.254]/latest/meta-data/",
+    "http://[::ffff:10.0.0.1]/",
+    "http://[::ffff:192.168.1.1]/",
+    "http://[::ffff:172.16.0.1]/",
+    "http://[::127.0.0.1]/",
+    "http://[::ffff:0:127.0.0.1]/",
+    "http://[64:ff9b::7f00:1]/",
+    "http://[64:ff9b::a9fe:a9fe]/",
+    "http://[2002:7f00:1::]/",
+    "http://[2002:a9fe:a9fe::1]/",
+    "http://[fec0::1]/",
+    "http://[ff02::1]/",
+    "http://[::]/",
+    "http://[0:0:0:0:0:0:0:1]/",
+    "http://[fe80::1%25eth0]/",
+    "http://198.18.0.1/",
+    "http://192.0.0.1/",
+  ];
+  for (const u of MUST_BLOCK) {
+    it(`blocks ${u}`, async () => {
+      await expect(assertPublicUrl(u)).rejects.toThrow();
+    });
+  }
+
+  it("still allows public addresses written the same ways", async () => {
+    for (const u of [
+      "http://[::ffff:8.8.8.8]/",
+      "http://[64:ff9b::808:808]/",
+      "http://[2002:808:808::1]/",
+      "http://[2606:4700:4700::1111]/",
+      "http://[2001:4860:4860::8888]/",
+    ]) {
+      await expect(assertPublicUrl(u)).resolves.toBeDefined();
+    }
+  });
+});
