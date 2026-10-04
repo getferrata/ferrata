@@ -8,8 +8,10 @@ concrete modules grounded in your sources, tests placed right after each
 concept, spaced repetition, and an honest measure of what each person
 actually knows.
 
-It runs on your own machine or server. Your material never leaves, and the
-AI provider is your choice, under your own key, at cost.
+It runs on your own machine or server, and your material is stored there. The AI
+provider is your choice, under your own key, at cost: with a hosted model, what
+the model reads goes to that provider (after secrets are stripped); with a local
+model, nothing leaves the machine.
 
 ## Highlights
 
