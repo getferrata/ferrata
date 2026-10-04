@@ -36,6 +36,7 @@ export default async function GlossaryPage({
         }
       />
       <main className="mx-auto max-w-measure px-6 py-12">
+        <h1 className="sr-only">Glossary: {bundle.course.title}</h1>
         <article
           className="reading-prose"
           dangerouslySetInnerHTML={{

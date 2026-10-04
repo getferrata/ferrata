@@ -97,6 +97,10 @@ FERRATA_LOG_KEEP=5            # rotated files to keep
 # allow fetching wiki links on private addresses (self-hosted networks)
 # FERRATA_ALLOW_PRIVATE_URLS=1
 
+# keep the session cookie working over plain http on an address other than
+# localhost. Only for a network you trust: the cookie then travels in clear.
+# FERRATA_INSECURE_COOKIES=1
+
 # encrypts provider keys and wiki tokens in the database. Any long random
 # string; keep a copy, because losing it makes stored keys unreadable.
 # FERRATA_SECRET_KEY=change-me-to-32-random-characters-or-more
@@ -185,6 +189,19 @@ training.example.com {
 
 Caddy provisions and renews the certificate on its own. With nginx, proxy
 `location /` to `http://127.0.0.1:3000` and use certbot for the certificate.
+
+### Without TLS
+
+The session cookie is `Secure`, so a browser keeps it only over HTTPS or on
+`localhost`. Opening the install as `http://localhost:3000` works. Opening it as
+`http://192.168.1.20:3000` or `http://training.internal:3000` does not: signing in
+appears to succeed and the browser discards the cookie. The sign-in form now says
+so instead of returning silently to the sign-in page.
+
+On a network you trust, with no way to put TLS in front, set
+`FERRATA_INSECURE_COOKIES=1` and restart. The cookie then travels in clear, so
+anyone on that network can read it; do not set it on anything reachable from the
+internet.
 
 ## 5. Accounts and spend
 

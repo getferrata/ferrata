@@ -280,6 +280,7 @@ export function LlmSettingsForm() {
       <section>
         <h2 className="mb-3 font-serif text-step-1">Provider</h2>
         <select
+          aria-label="Provider"
           value={provider}
           onChange={(e) => {
             setProvider(e.target.value as ProviderChoice);
@@ -443,7 +444,7 @@ export function LlmSettingsForm() {
 
       {/* Contextia: always-on protection, in its own brand */}
       <aside className="rounded-lg border border-border bg-surface p-5">
-        <p className="font-mono text-step-0 font-semibold text-[#ff5f57]">
+        <p className="font-mono text-step-0 font-semibold text-accent">
           Contextia
         </p>
         <p className="mt-2 max-w-measure text-step--1 text-text-muted">
@@ -459,7 +460,7 @@ export function LlmSettingsForm() {
             href="https://contextia.dev"
             target="_blank"
             rel="noopener"
-            className="tap text-[#ff5f57] underline underline-offset-2"
+            className="tap text-accent underline underline-offset-2"
           >
             How Contextia works
           </a>

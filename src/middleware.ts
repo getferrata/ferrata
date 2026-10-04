@@ -24,6 +24,15 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  // Everything except Next internals and static assets.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|ico)$).*)"],
+  // Everything except Next internals, static assets, and the three upload routes.
+  //
+  // A route behind middleware has its body copied for the middleware to read, and
+  // Next stops copying at 10 MB: anything larger arrives truncated, and a course
+  // built from three 4 MB documents failed with "Error 400". The documented
+  // limits (10 MB a file, 50 MB a request) could not be reached. These routes
+  // check the session themselves before they read a byte, which is what the
+  // comment at the top of this file says every route that matters does.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|ico)$|api/courses$|api/courses/[^/]+/sources$|api/import(?:/preview)?$).*)",
+  ],
 };

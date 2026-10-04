@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDate } from "@/lib/format-date";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -74,11 +76,7 @@ export function EditModule({
         {editedAt ? (
           <span className="text-step--1 text-text-muted">
             Edited by hand on{" "}
-            {new Date(editedAt).toLocaleDateString(undefined, {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })}
+            {formatDate(editedAt)}
             .
           </span>
         ) : null}

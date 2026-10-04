@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format-date";
 import Link from "next/link";
 import type { CourseBundle } from "@/lib/course/query";
 import { renderMarkdown } from "@/lib/md";
@@ -116,7 +117,7 @@ export function CourseOverview({
         <span>~{Math.round(totalMinutes / 60)} h of study</span>
         {deadline ? (
           <span className="text-text">
-            Deadline: {new Date(deadline).toLocaleDateString("it-IT")}
+            Deadline: {formatDate(deadline)}
           </span>
         ) : null}
         {course.budgetMinutes ? (

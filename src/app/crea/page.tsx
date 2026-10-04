@@ -1,5 +1,6 @@
 "use client";
 
+import { formatBytes } from "@/lib/http/upload-limits";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -61,7 +62,7 @@ const DEPTHS: { key: Depth; label: string; hint: string }[] = [
 ];
 
 const MODES: { key: Contextia; label: string; hint: string }[] = [
-  { key: "redact", label: "Protected", hint: "Recommended. Secrets (keys, tokens, PII) are removed before any model sees them. Internal IPs and server names are hidden from the model and restored into the finished course, marked as protected." },
+  { key: "redact", label: "Protected", hint: "Recommended. Secrets (keys, tokens), cards, IBANs and national ID numbers are removed before any model sees them. Internal IPs, server names, email addresses and +international phone numbers are hidden from the model and restored into the finished course, marked as protected." },
   { key: "block", label: "Block secrets", hint: "Like Protected, but a source containing critical secrets is refused. You clean it and re-upload." },
   { key: "off", label: "Off", hint: "No scan: text passes through untouched. Only for material you've already cleaned. Secrets can reach the model." },
 ];
@@ -153,7 +154,10 @@ export default function CreatePage() {
       fd.append("contextia", contextia);
       for (const f of files) fd.append("files", f);
       const res = await fetch("/api/courses", { method: "POST", body: fd });
-      if (!res.ok) throw new Error(`Error ${res.status}`);
+      if (!res.ok) {
+        const why = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(why?.error ?? `Error ${res.status}`);
+      }
       const data = (await res.json()) as { id: string };
       router.push(`/courses/${data.id}`);
     } catch (err) {
@@ -350,7 +354,7 @@ export default function CreatePage() {
                     <span className="min-w-0 truncate text-text">{f.name}</span>
                     <span className="flex shrink-0 items-center gap-3">
                       <span className="font-mono text-text-muted">
-                        {(f.size / 1024).toFixed(0)} KB
+                        {formatBytes(f.size)}
                       </span>
                       <button
                         type="button"

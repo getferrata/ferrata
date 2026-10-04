@@ -5,7 +5,7 @@ import {
 } from "@sbr0nch/contextia-engine";
 import { createHmac, randomBytes } from "node:crypto";
 import { getSetting, setSetting } from "@/lib/settings";
-import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES } from "./well-known";
+import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES, isDocumentationEmail } from "./well-known";
 
 /**
  * DLP gate, backed by Contextia (on-device secret/PII detection). Source text
@@ -14,7 +14,8 @@ import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES } from "./well-known";
  * Two outcomes per finding:
  *  - CRITICAL secrets + PII (keys, tokens, cards, SSN, emails…): redacted
  *    irreversibly to ⟨redacted:type⟩. They never reach the model and never come back.
- *  - RESTORABLE operational values (private IPs, internal hostnames): replaced
+ *  - RESTORABLE values (private IPs, internal hostnames, email addresses, phone
+ *    numbers): replaced
  *    with a stable placeholder token ⟨cxt:hash⟩ that the model sees instead of the
  *    real value, but we keep a restore map so Ferrata can put the real value
  *    back into the finished course (marked as Contextia-protected). This is what
@@ -24,8 +25,26 @@ import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES } from "./well-known";
  * operational values are kept (they are the operator's own infra data, local).
  */
 
-// Operational infra values a course legitimately needs, safe to restore.
-const RESTORABLE = new Set(["private_ip", "internal_hostname"]);
+// Values a course legitimately needs, safe to restore: infrastructure the
+// student has to reach, and the people they have to ask. The model sees a
+// placeholder, the student sees the real value.
+const RESTORABLE = new Set([
+  "private_ip",
+  "internal_hostname",
+  "email",
+  "phone_e164",
+]);
+
+// Personal data a reader never needs back. Removed for good, like a secret.
+const PII_REDACTED = [
+  "credit_card",
+  "iban",
+  "us_ssn",
+  "us_itin",
+  "india_aadhaar",
+  "india_pan",
+  "uk_nino",
+];
 
 /**
  * Operator control (env, read per-call so a restart isn't needed to re-read):
@@ -71,14 +90,20 @@ function allowValues(): string[] {
   ];
 }
 
-// The default detectors PLUS the restorable ones (which ship default-disabled):
-// we want to catch IPs/hostnames precisely so we can protect *and* restore them.
+// The default detectors PLUS the restorable ones and the personal-data ones, all
+// of which the engine ships switched off (it classes them as warnings). The
+// create page promises that PII never reaches a model; leaving them off made that
+// untrue: email addresses, phone numbers and card numbers went to the provider.
 const ENABLED_DETECTORS = [
   ...new Set([
     ...detectors.filter((d) => d.defaultEnabled).map((d) => d.id),
     ...RESTORABLE,
+    ...PII_REDACTED,
   ]),
 ];
+
+/** Every detector this module switches on by name; checked against the engine in a test. */
+export const REQUIRED_DETECTORS: readonly string[] = [...RESTORABLE, ...PII_REDACTED];
 
 export interface Restoration {
   token: string;
@@ -216,10 +241,17 @@ export async function scanSensitivity(
   // detectDetailed, not detect: the engine caps how much it reads, and on a
   // long file an empty result means "nothing in the part we read", not "clean".
   // Treating that as clean would send the unscanned tail straight to the model.
-  const { findings, truncated, scannedLength } = detectDetailed(text, {
+  const detected = detectDetailed(text, {
     enabledDetectors: ENABLED_DETECTORS,
     allowlist: { values: allowValues(), patterns: [...WELL_KNOWN_PATTERNS] },
   });
+  const { truncated, scannedLength } = detected;
+  // An address under a domain reserved for examples names nobody. Dropped here,
+  // by type, rather than through the allowlist, which would clear any secret that
+  // happens to end in one (see isDocumentationEmail).
+  const findings = detected.findings.filter(
+    (f) => !(f.type === "email" && isDocumentationEmail(text.slice(f.start, f.end))),
+  );
   if (truncated) {
     return {
       text,
