@@ -1,5 +1,5 @@
 import type { ExtractedFigure } from "./figures";
-import { assertReasonableZip } from "./zip-guard";
+import { assertReasonableZip } from "./inflate-guard";
 
 /**
  * Pull the pictures out of a .docx, with a marker left where each one sat.

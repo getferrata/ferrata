@@ -105,3 +105,63 @@ describe("a docx that inflates far beyond its size is refused before it is parse
     expect(r.ok).toBe(false);
   });
 });
+
+/** A hand-built single-page PDF whose content stream holds `mb` MB of text operators. */
+async function pdfOfSize(mb: number, opts: { image?: boolean } = {}): Promise<Buffer> {
+  const { deflateSync } = await import("node:zlib");
+  const unit = "BT /F1 12 Tf 72 700 Td (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) Tj ET\n";
+  const z = deflateSync(Buffer.from(unit.repeat(Math.max(1, Math.floor((mb * 1048576) / unit.length)))), { level: 9 });
+  const dict = `<< /Length ${z.length} /Filter /FlateDecode${opts.image ? " /Subtype /Image /Width 1 /Height 1" : ""} >>`;
+  const objs: Array<string | null> = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    null,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  const parts: Buffer[] = [Buffer.from("%PDF-1.4\n")];
+  const offs: number[] = [];
+  let len = parts[0]!.length;
+  objs.forEach((o, i) => {
+    offs.push(len);
+    const b =
+      o === null
+        ? Buffer.concat([Buffer.from(`${i + 1} 0 obj\n${dict}\nstream\n`), z, Buffer.from("\nendstream\nendobj\n")])
+        : Buffer.from(`${i + 1} 0 obj\n${o}\nendobj\n`);
+    parts.push(b);
+    len += b.length;
+  });
+  const xref =
+    `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` +
+    offs.map((o) => String(o).padStart(10, "0") + " 00000 n \n").join("") +
+    `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${len}\n%%EOF\n`;
+  return Buffer.concat([...parts, Buffer.from(xref)]);
+}
+
+describe("a pdf whose page content inflates far beyond its size is refused", () => {
+  // Measured on the unguarded path: 0.12 MB of file took 7.8 s to read, and the
+  // time is linear in what the streams hold.
+  it("refuses 200 MB of page content that weighs well under 1 MB, quickly", async () => {
+    const bomb = await pdfOfSize(200);
+    expect(bomb.length).toBeLessThan(1_000_000);
+    const t = performance.now();
+    const r = await extractText("report.pdf", "application/pdf", bomb);
+    expect(performance.now() - t).toBeLessThan(3_000);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/too large|split/i);
+  }, 60_000);
+
+  it("still reads an ordinary pdf", async () => {
+    const r = await extractText("report.pdf", "application/pdf", await pdfOfSize(1));
+    expect(r.error ?? "").toBe("");
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain("aaaa");
+  }, 30_000);
+
+  it("does not count a large image, which scans legitimately have", async () => {
+    // Not read as text, so this only has to get past the guard.
+    const { assertReasonablePdf } = await import("@/lib/sources/inflate-guard");
+    const scan = await pdfOfSize(200, { image: true });
+    expect(() => assertReasonablePdf(scan)).not.toThrow();
+  }, 60_000);
+});
