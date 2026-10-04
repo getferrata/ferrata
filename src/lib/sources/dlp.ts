@@ -5,7 +5,7 @@ import {
 } from "@sbr0nch/contextia-engine";
 import { createHmac, randomBytes } from "node:crypto";
 import { getSetting, setSetting } from "@/lib/settings";
-import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES } from "./well-known";
+import { WELL_KNOWN_PATTERNS, WELL_KNOWN_VALUES, isDocumentationEmail } from "./well-known";
 
 /**
  * DLP gate, backed by Contextia (on-device secret/PII detection). Source text
@@ -241,10 +241,17 @@ export async function scanSensitivity(
   // detectDetailed, not detect: the engine caps how much it reads, and on a
   // long file an empty result means "nothing in the part we read", not "clean".
   // Treating that as clean would send the unscanned tail straight to the model.
-  const { findings, truncated, scannedLength } = detectDetailed(text, {
+  const detected = detectDetailed(text, {
     enabledDetectors: ENABLED_DETECTORS,
     allowlist: { values: allowValues(), patterns: [...WELL_KNOWN_PATTERNS] },
   });
+  const { truncated, scannedLength } = detected;
+  // An address under a domain reserved for examples names nobody. Dropped here,
+  // by type, rather than through the allowlist, which would clear any secret that
+  // happens to end in one (see isDocumentationEmail).
+  const findings = detected.findings.filter(
+    (f) => !(f.type === "email" && isDocumentationEmail(text.slice(f.start, f.end))),
+  );
   if (truncated) {
     return {
       text,

@@ -54,10 +54,6 @@ export const WELL_KNOWN_PATTERNS: readonly string[] = [
   String.raw`^203\.0\.113\.\d{1,3}$`,
   // RFC 3849: the same idea for IPv6.
   String.raw`^2001:0?db8:`,
-  // RFC 2606 and RFC 6761: domains reserved for examples and tests, so an address
-  // under them names nobody. Every how-to that mentions git config or a mail
-  // setting uses one.
-  String.raw`^[^@\s]+@(?:[a-z0-9-]+\.)*(?:example\.(?:com|org|net)|example|test|invalid|localhost)$`,
 ];
 
 const COMPILED = WELL_KNOWN_PATTERNS.map((p) => new RegExp(p, "i"));
@@ -78,4 +74,23 @@ export function isWellKnownAddress(value: string): boolean {
   if (v === "") return false;
   if (EXACT.has(v)) return true;
   return COMPILED.some((re) => re.test(v));
+}
+
+/**
+ * Email addresses under the domains RFC 2606 and RFC 6761 reserve for examples
+ * and tests, so an address there names nobody. Every how-to that mentions git
+ * config or a mail setting uses one.
+ *
+ * Deliberately a check on an email finding, not an allowlist pattern: the engine
+ * applies an allowlist to the text matched by every detector, so a pattern broad
+ * enough to cover "anything@example.com" also cleared a connection string such as
+ * postgres://admin:secret@db.example.com, and the password reached the model.
+ * The local part is the email detector's own character class, which cannot
+ * contain the ":" or "/" of a URL.
+ */
+const DOCUMENTATION_EMAIL =
+  /^[A-Za-z0-9._%+-]+@(?:[a-z0-9-]+\.)*(?:example\.(?:com|org|net)|example|test|invalid|localhost)$/i;
+
+export function isDocumentationEmail(address: string): boolean {
+  return DOCUMENTATION_EMAIL.test(address);
 }
