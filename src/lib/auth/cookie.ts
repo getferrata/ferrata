@@ -41,10 +41,5 @@ export const COOKIE_REFUSED_MESSAGE =
 
 /** Did the sign-in actually leave a session the server can see? */
 export function sessionWasKept(me: unknown): boolean {
-  return (
-    typeof me === "object" &&
-    me !== null &&
-    "user" in me &&
-    (me as { user: unknown }).user != null
-  );
+  return typeof me === "object" && me !== null && "user" in me && me.user != null;
 }
